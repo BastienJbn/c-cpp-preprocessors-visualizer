@@ -7,14 +7,27 @@
     "vscode": "^1.87.0"
   },
   "categories": [
+    "Programming Languages",
     "Other"
   ],
   "activationEvents": [
+    "onCommand:c-cpp-preprocessors-visualizer.enable",
     "onLanguage:c",
     "onLanguage:cpp"
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "configuration": {
+      "type": "object",
+      "title": "c-cpp-preprocessors-visualizer",
+      "properties": {
+        "c-cpp-preprocessors-visualizer.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable this extension"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
