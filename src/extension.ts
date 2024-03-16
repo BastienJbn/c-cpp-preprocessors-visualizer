@@ -1,26 +1,91 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
+let decorationType: vscode.TextEditorDecorationType;
+
 export function activate(context: vscode.ExtensionContext) {
+    console.log('[DEBUG]', 'Extension is active');
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "c-cpp-macro-highlighter" is now active!');
+    decorationType = vscode.window.createTextEditorDecorationType({
+        border: '1px solid grey',
+    });
 
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	let disposable = vscode.commands.registerCommand('c-cpp-macro-highlighter.helloWorld', () => {
-		// The code you place here will be executed every time your command is executed
-		// Display a message box to the user
-		vscode.window.showInformationMessage('Hello World from C/C++ Macro Highlighter!');
-	});
+    let activeEditor = vscode.window.activeTextEditor;
 
-	context.subscriptions.push(disposable);
+    if (activeEditor) {
+        highlightPairs(activeEditor);
+    }
+
+    vscode.window.onDidChangeActiveTextEditor(editor => {
+        activeEditor = editor;
+        if (activeEditor) {
+            highlightPairs(activeEditor);
+        }
+    }, null, context.subscriptions);
+
+    vscode.workspace.onDidChangeTextDocument(event => {
+        if (activeEditor && event.document === activeEditor.document) {
+            highlightPairs(activeEditor);
+        }
+    }, null, context.subscriptions);
+
+    vscode.window.onDidChangeTextEditorSelection(event => {
+        if (activeEditor && event.textEditor === activeEditor) {
+            highlightPairs(activeEditor);
+        }
+    }, null, context.subscriptions);
 }
 
-// This method is called when your extension is deactivated
-export function deactivate() {}
+async function highlightPairs(editor: vscode.TextEditor) {
+    const decorations: vscode.DecorationOptions[] = [];
+    const position = editor.selection.active;
+
+    const line = editor.document.lineAt(position.line);
+    const text = line.text.trim();
+    const start = line.range.start;
+    const end = line.range.end;
+
+    // Check if the cursor is at an #ifdef or #endif directive
+    if (text.startsWith('#ifdef') || text.startsWith('#endif')) {
+        const decoration = { range: new vscode.Range(start, end) };
+        decorations.push(decoration);
+
+        // Find and highlight the corresponding keyword
+        const correspondingKeyword = findCorrespondingKeyword(editor.document, position);
+        if (correspondingKeyword) {
+            const decorationForCorrespondingKeyword = { range: correspondingKeyword };
+            decorations.push(decorationForCorrespondingKeyword);
+        }
+    }
+
+    editor.setDecorations(decorationType, decorations);
+}
+
+function findCorrespondingKeyword(document: vscode.TextDocument, position: vscode.Position): vscode.Range | undefined {
+    const line = document.lineAt(position.line);
+    const text = line.text.trim();
+
+    let targetKeyword: string;
+    if (text.startsWith('#ifdef')) {
+        targetKeyword = '#endif';
+    } else if (text.startsWith('#endif')) {
+        targetKeyword = '#ifdef';
+    } else {
+        return undefined;
+    }
+
+    for (let lineIndex = position.line + 1; lineIndex < document.lineCount; lineIndex++) {
+        const currentLine = document.lineAt(lineIndex);
+        const currentText = currentLine.text.trim();
+        if (currentText.startsWith(targetKeyword)) {
+            return currentLine.range;
+        }
+    }
+
+    return undefined;
+}
+
+export function deactivate() {
+    if (decorationType) {
+        decorationType.dispose();
+    }
+}
