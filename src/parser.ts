@@ -1,33 +1,8 @@
 import * as vscode from 'vscode';
 
-let decorationType: vscode.TextEditorDecorationType = 
-vscode.window.createTextEditorDecorationType({
-    border: '1px solid grey',
-});
-
-const openingKeywords = [
-    '#if',
-    '#ifdef',
-    '#if defined',
-    '#ifndef',
-    '#if !defined',
-    '#ifeq',
-    '#ifneq'
-];
-
-const middleKeywords = [
-    '#elif',
-    '#else'
-];
-
-const closingKeywords = [
-    '#endif'
-];
-
-const enum Direction {
-    Up = -1,
-    Down = 1
-}
+//###################//
+// Public functions //
+//###################//
 
 /**
  * @brief Highlight the matching preprocessor directives under the cursor (if any)
@@ -70,6 +45,54 @@ export async function outlinePairUnderCursor(editor: vscode.TextEditor) {
     editor.setDecorations(decorationType, decorations);
 }
 
+//###################//
+// Private functions //
+//###################//
+
+/**
+ * @brief The decoration type to use for the matching preprocessor directives
+ */
+let decorationType: vscode.TextEditorDecorationType = 
+vscode.window.createTextEditorDecorationType({
+    border: '1px solid grey',
+});
+
+/**
+ * @brief List of opening preprocessor directives
+ */
+const openingKeywords = [
+    '#if',
+    '#ifdef',
+    '#if defined',
+    '#ifndef',
+    '#if !defined',
+    '#ifeq',
+    '#ifneq'
+];
+
+/**
+ * @brief List of middle preprocessor directives
+ */
+const middleKeywords = [
+    '#elif',
+    '#else'
+];
+
+/**
+ * @brief List of closing preprocessor directives
+ */
+const closingKeywords = [
+    '#endif'
+];
+
+/**
+ * @brief Enum to represent the direction of the search
+ */
+const enum Direction {
+    Up = -1,
+    Down = 1
+}
+
 /*
 * @brief Find the matching keywords for the given position in the document.
 * 
@@ -81,7 +104,7 @@ export async function outlinePairUnderCursor(editor: vscode.TextEditor) {
 * @param direction The direction to search in (0 for up, 1 for down)
 * @returns An array of ranges containing the matching keywords
 */
-export function findMatchingKeywords(document: vscode.TextDocument, position: vscode.Position): vscode.Range[] {
+function findMatchingKeywords(document: vscode.TextDocument, position: vscode.Position): vscode.Range[] {
     const line = document.lineAt(position.line);
     const text = line.text.trim();
     const start = line.range.start;
@@ -193,6 +216,10 @@ function searchKeywords(document: vscode.TextDocument, position: vscode.Position
 
     return ret;
 }
+
+//###################//
+// String extensions //
+//###################//
 
 // Extend the String prototype to add startsWithOpeningKeyword
 declare global {
