@@ -4,7 +4,7 @@ import { outlinePairUnderCursor } from "./parser";
 export function activate(context: vscode.ExtensionContext) {
     console.log('[DEBUG]', 'Extension is active');
     
-    let activeEditor: vscode.TextEditor;
+    let activeEditor: vscode.TextEditor = vscode.window.activeTextEditor!;
 
     // Triggered whenever the active text editor changes
     vscode.window.onDidChangeActiveTextEditor(editor => {

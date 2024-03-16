@@ -20,7 +20,7 @@ export async function outlinePairUnderCursor(editor: vscode.TextEditor) {
     const line = editor.document.lineAt(position.line);
     const text = line.text.trim();
 
-    console.log('[outlinePairUnderCursor] File: ', editor.document.fileName, 
+    console.log('[outlinePairUnderCursor] File:', vscode.workspace.asRelativePath(editor.document.fileName), 
                 '  Ln:', position.line.toString().padStart(4, '0'), 
                 '  Col:', position.character.toString().padStart(4, '0'), 
                 '  Parsed: "', text, '"');
