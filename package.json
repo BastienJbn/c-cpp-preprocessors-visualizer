@@ -1,13 +1,13 @@
 {
-  "name": "c-cpp-macro-highlighter",
-  "displayName": "C/C++ Macro Highlighter",
+  "name": "c-cpp-macro-visualizer",
+  "displayName": "C/C++ Macro Visualizer",
   "description": "Intuitive visual cues and improved navigation for preprocessor directives",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.87.0"
   },
   "categories": [
-    "Programming Languages"
+    "Other"
   ],
   "activationEvents": [
     "onLanguage:c",
