@@ -6,10 +6,10 @@
 		{
 			"type": "npm",
 			"script": "compile",
-			"problemMatcher": "$tsc-watch",
-			"isBackground": true,
+			"problemMatcher": "$tsc",
+			"isBackground": false,
 			"presentation": {
-				"reveal": "never"
+				"reveal": "silent"
 			},
 			"group": {
 				"kind": "build",
@@ -22,7 +22,7 @@
 			"problemMatcher": "$tsc-watch",
 			"isBackground": true,
 			"presentation": {
-				"reveal": "never"
+				"reveal": "silent"
 			},
 			"group": {
 				"kind": "build",
