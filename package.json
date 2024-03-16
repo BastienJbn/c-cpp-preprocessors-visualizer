@@ -1,7 +1,7 @@
 {
-  "name": "c-cpp-macro-visualizer",
-  "displayName": "C/C++ Macro Visualizer",
-  "description": "Intuitive visual cues and improved navigation for preprocessor directives",
+  "name": "c-cpp-preprocessors-visualizer",
+  "displayName": "C/C++ Preprocessors Visualizer",
+  "description": "Intuitive visual cues for macro and preprocessor directives",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.87.0"
