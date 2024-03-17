@@ -6,6 +6,23 @@ export function activate(context: vscode.ExtensionContext) {
     
     let activeEditor: vscode.TextEditor = vscode.window.activeTextEditor!;
 
+    // Trigger the parser on activation
+    {
+        // Editor should not be null
+        if (!activeEditor) {
+            return;
+        }
+    
+        // Language should be C or C++
+        const languageId = activeEditor.document.languageId;
+        if ( !(languageId === 'c' || languageId === 'cpp') ) {
+            return;
+        }
+    
+        // Trigger the parser
+        outlinePairUnderCursor(activeEditor);
+    }
+
     // Triggered whenever the active text editor changes
     vscode.window.onDidChangeActiveTextEditor(editor => {
         // Editor should not be null
