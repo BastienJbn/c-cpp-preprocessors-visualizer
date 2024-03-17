@@ -2,7 +2,7 @@
   "name": "c-cpp-preprocessors-visualizer",
   "displayName": "C/C++ Preprocessors Visualizer",
   "description": "Intuitive visual cues for macro and preprocessor directives",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "engines": {
     "vscode": "^1.87.0"
   },
@@ -51,5 +51,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/BastienJbn/c-cpp-preprocessors-visualizer.git"
-  }
+  },
+  "publisher": "bjubineau"
 }
