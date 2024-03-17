@@ -40,6 +40,16 @@ int main() {
 
 #endif
 
+// Indentation test
+    #ifdef A
+    int a = 1;
+        #ifdef B
+        int b = 2;
+        #else
+        int b = 3;
+        #endif
+    #endif
+
     printf("MAX_OK: %d\n", MAX_OK(a, b));
 
   return 0;
