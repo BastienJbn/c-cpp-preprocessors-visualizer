@@ -25,6 +25,13 @@ int main() {
 #ifdef A
     int a = 1;
 #elif defined B
+
+#ifdef C
+    int c = 1;
+#else
+    int c = 2;
+#endif
+
     int b = 2;
 #else
     int b = 3;
