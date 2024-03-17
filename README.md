@@ -26,6 +26,10 @@ This extension is a tool for a better visualization of preprocessor directives i
 
 ## Release Notes
 
+### 0.1.1
+
+**Fix** outline behavior whith indentated directives and selection.
+
 ### 0.1.0
 <!-- bold -->
 **Initial release** of C/C++ Preprocessors Visualizer.
