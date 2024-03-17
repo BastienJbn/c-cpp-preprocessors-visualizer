@@ -82,7 +82,15 @@ export async function outlinePairUnderCursor(editor: vscode.TextEditor) {
 
         // If matching keywords were found, add the current line to the decorations
         if (matchingKeywords.length > 0) {
-            keywordRanges.push( line.range );
+            // Make an array of all the keywords
+            const allKeywords = openingKeywords.concat(middleKeywords).concat(closingKeywords);
+            // Find the range of the keyword in line
+            allKeywords.forEach(keyword => {
+                const k = parseKeywordRange(line, keyword);
+                if (k) {
+                    keywordRanges.push(k);
+                }
+            });
         }
 
         // If no matching keywords were found, no decorations are added
@@ -234,7 +242,13 @@ function searchKeywords(document: vscode.TextDocument, position: vscode.Position
         if ( text.startsWithOpeningKeyword() ) {
             // If we are going up and the depth is 0, we found the last keyword
             if ( (direction === Direction.Up) && (depth === 0) ) {
-                ret.push(new vscode.Range(line, 0, line, text.length)); // Add the range of the keyword
+                // Find the range of the keyword in line
+                openingKeywords.forEach(keyword => {
+                    const range = parseKeywordRange(document.lineAt(line), keyword);
+                    if (range) {
+                        ret.push(range); // Add the range of the keyword
+                    }
+                });
                 found = true; // Stop the search
             }
             // Otherwise, increase the depth
@@ -247,7 +261,13 @@ function searchKeywords(document: vscode.TextDocument, position: vscode.Position
         else if (text.startsWithMiddleKeyword()) {
             // If its on the same depth, we found a matching keyword
             if (depth === 0) {
-                ret.push(new vscode.Range(line, 0, line, text.length)); // Add the range of the keyword
+                // Find the range of the keyword in line
+                middleKeywords.forEach(keyword => {
+                    const range = parseKeywordRange(document.lineAt(line), keyword);
+                    if (range) {
+                        ret.push(range); // Add the range of the keyword
+                    }
+                });
             }
         }
 
@@ -255,7 +275,13 @@ function searchKeywords(document: vscode.TextDocument, position: vscode.Position
         else if ( text.startsWithClosingKeyword() ) {
             // If we are going down and the depth is 0, we found the last keyword
             if ( (direction === Direction.Down) && (depth === 0) ) {
-                ret.push(new vscode.Range(line, 0, line, text.length)); // Add the range of the keyword
+                // Find the range of the keyword in line
+                closingKeywords.forEach(keyword => {
+                    const range = parseKeywordRange(document.lineAt(line), keyword);
+                    if (range) {
+                        ret.push(range); // Add the range of the keyword
+                    }
+                });
                 found = true; // Stop the search
             }
             // Otherwise, decrease the depth
@@ -269,6 +295,21 @@ function searchKeywords(document: vscode.TextDocument, position: vscode.Position
     }
 
     return ret;
+}
+
+/**
+ * @brief Parse the given line and search for the given keyword
+ * 
+ * @param line The line to parse
+ * @param keyword The keyword to search for
+ * @returns The range of the keyword if found, undefined otherwise
+ */
+function parseKeywordRange(line: vscode.TextLine, keyword: string): vscode.Range | undefined {
+    const index = line.text.indexOf(keyword);
+    if (index !== -1) {
+        return new vscode.Range(line.lineNumber, index, line.lineNumber, index + keyword.length);
+    }
+    return undefined;
 }
 
 function editorChanged(editor: vscode.TextEditor | undefined) {
