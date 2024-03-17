@@ -4,6 +4,52 @@ import * as vscode from 'vscode';
 // Public functions //
 //###################//
 
+export function parserActivate(context: vscode.ExtensionContext) {
+    // variables init
+    currEditor = vscode.window.activeTextEditor;
+
+    // Trigger the parser on the active text editor
+    if (currEditor) {
+        outlinePairUnderCursor(currEditor);
+    }
+
+    // On every change in the active text editor
+    vscode.window.onDidChangeActiveTextEditor(editor => {
+        if(editor) {
+            console.log('Editor changed to ', vscode.workspace.asRelativePath(editor.document.fileName));
+        }
+        else {
+            console.log('Editor changed to undefined');
+        }
+
+        editorChanged(editor);
+        if(currEditor) {
+            outlinePairUnderCursor(currEditor);
+        }
+    }, null, context.subscriptions);
+
+    // On every change in the text document
+    vscode.workspace.onDidChangeTextDocument(event => {
+        if (currEditor && (event.document === currEditor.document)) {
+            outlinePairUnderCursor(currEditor);
+        }
+    }, null, context.subscriptions);
+
+    // On every change in the text editor selection
+    vscode.window.onDidChangeTextEditorSelection(event => {
+        if (currEditor && (event.textEditor === currEditor)) {
+            outlinePairUnderCursor(currEditor);
+        }
+    }, null, context.subscriptions);
+}
+
+export function parserDeactivate() {
+    // Remove the decorations from the current editor
+    if (currEditor) {
+        currEditor.setDecorations(decorationType, []);
+    }
+}
+
 /**
  * @brief Highlight the matching preprocessor directives under the cursor (if any)
  * 
@@ -11,14 +57,16 @@ import * as vscode from 'vscode';
  * @returns 
  */
 export async function outlinePairUnderCursor(editor: vscode.TextEditor) {
-    if (!editor) {
-        return; // No open text editor
+    // Language should be C or C++
+    const languageId = editor.document.languageId;
+    if ( !(languageId === 'c' || languageId === 'cpp' || languageId === 'h' || languageId === 'hpp') ) {
+        return;
     }
-    const decorations: vscode.DecorationOptions[] = [];
-    const position = editor.selection.active;
 
+    const position = editor.selection.active;
     const line = editor.document.lineAt(position.line);
     const text = line.text.trim();
+    const keywordRanges: vscode.Range[] = [];
 
     console.log('[outlinePairUnderCursor] File:', vscode.workspace.asRelativePath(editor.document.fileName), 
                 '  Ln:', position.line.toString().padStart(4, '0'), 
@@ -29,13 +77,12 @@ export async function outlinePairUnderCursor(editor: vscode.TextEditor) {
     if (text.startsWithOpeningKeyword() || text.startsWithMiddleKeyword() || text.startsWithClosingKeyword()) {
         // Find matching keywords
         const matchingKeywords = findMatchingKeywords(editor.document, position);
-        matchingKeywords.forEach(range => {
-            decorations.push({ range });
-        });
+        // Add the matching keywords to the list of ranges
+        keywordRanges.push(...matchingKeywords);
 
         // If matching keywords were found, add the current line to the decorations
         if (matchingKeywords.length > 0) {
-            decorations.push({ range: line.range });
+            keywordRanges.push( line.range );
         }
 
         // If no matching keywords were found, no decorations are added
@@ -44,12 +91,15 @@ export async function outlinePairUnderCursor(editor: vscode.TextEditor) {
         console.log('[outlinePairUnderCursor] No preprocessor directive found');
     }
 
-    editor.setDecorations(decorationType, decorations);
+    // Set the decorations to the ranges detected as matching keywords
+    editor.setDecorations(decorationType, keywordRanges);
 }
 
 //###################//
 // Private functions //
 //###################//
+
+let currEditor: vscode.TextEditor | undefined;
 
 /**
  * @brief The decoration type to use for the matching preprocessor directives
@@ -221,6 +271,17 @@ function searchKeywords(document: vscode.TextDocument, position: vscode.Position
     return ret;
 }
 
+function editorChanged(editor: vscode.TextEditor | undefined) {
+    // Remove the decorations from the current editor, if any
+    if(currEditor && (currEditor !== editor)) {
+        currEditor!.setDecorations(decorationType, []);
+    }
+
+    // Set the new editor as the current editor
+    currEditor = editor;
+}
+
+
 //###################//
 // String extensions //
 //###################//
@@ -260,3 +321,4 @@ String.prototype.startsWithClosingKeyword = function() {
 String.prototype.startsWithMiddleKeyword = function() {
     return middleKeywords.some(keyword => this.trim().startsWith(keyword));
 };
+
