@@ -63,6 +63,13 @@ export async function outlinePairUnderCursor(editor: vscode.TextEditor) {
         return;
     }
 
+    // Should not outline when there is a selection
+    const selection = editor.selection;
+    if (!selection.start.isEqual(selection.end)) {
+        currEditor!.setDecorations(decorationType, []); // Remove the decorations
+        return;
+    }
+
     const position = editor.selection.active;
     const line = editor.document.lineAt(position.line);
     const text = line.text.trim();
