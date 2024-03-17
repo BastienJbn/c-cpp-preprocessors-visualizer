@@ -37,6 +37,8 @@ export async function outlinePairUnderCursor(editor: vscode.TextEditor) {
         if (matchingKeywords.length > 0) {
             decorations.push({ range: line.range });
         }
+
+        // If no matching keywords were found, no decorations are added
     }
     else {
         console.log('[outlinePairUnderCursor] No preprocessor directive found');
@@ -54,7 +56,9 @@ export async function outlinePairUnderCursor(editor: vscode.TextEditor) {
  */
 let decorationType: vscode.TextEditorDecorationType = 
 vscode.window.createTextEditorDecorationType({
-    border: '1px solid grey',
+    border: '1px solid grey',  //Outline
+    overviewRulerLane: vscode.OverviewRulerLane.Center,  //Show in the overview ruler
+    overviewRulerColor: '#929292',  //Color
 });
 
 /**
