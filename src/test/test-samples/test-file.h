@@ -1,6 +1,8 @@
 #define A
 #define B
 
+#undef A
+
 #define MAX_OK(x , y)   \
  ((x) > (y)             \
  ? (x)                  \

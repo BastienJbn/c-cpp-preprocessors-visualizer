@@ -4,16 +4,6 @@
 // Off screen test
 #ifdef A
 
-#define MAX_OK(x , y)   \
- ((x) > (y)             \
- ? (x)                  \
- : (y))
-
-#define MAX_ERR(x , y)  \
- ((x) > (y)             
- ? (x)                  \
- : (y)) 
-
 int main() {
     int a,b;
 
@@ -40,10 +30,25 @@ int main() {
 
 #endif
 
-    printf("MAX_OK: %d\n", MAX_OK(a, b));
+// Indentation test
+    #ifdef A
+    int a = 1;
+        #ifdef B
+        int b = 2;
+        #else
+        int b = 3;
+        #endif
+    #endif
 
   return 0;
 }
+
+// Definition test
+#undef A
+#undef B
+
+#undef //Bad line test
+
 
 
 
