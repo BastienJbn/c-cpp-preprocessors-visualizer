@@ -80,8 +80,8 @@ export async function outlinePairUnderCursor(editor: vscode.TextEditor) {
                 '  Col:', position.character.toString().padStart(4, '0'), 
                 '  Parsed: "', text, '"');
 
-    // Check if the cursor is on an opening, middle or closing preprocessor directive
-    if (text.startsWithOpeningKeyword() || text.startsWithMiddleKeyword() || text.startsWithClosingKeyword()) {
+    // Check if the cursor is on a directive
+    if (text.startsWith('#')) {
         // Find matching keywords
         const matchingKeywords = findMatchingKeywords(editor.document, position);
         // Add the matching keywords to the list of ranges
@@ -90,7 +90,7 @@ export async function outlinePairUnderCursor(editor: vscode.TextEditor) {
         // If matching keywords were found, add the current line to the decorations
         if (matchingKeywords.length > 0) {
             // Make an array of all the keywords
-            const allKeywords = openingKeywords.concat(middleKeywords).concat(closingKeywords);
+            const allKeywords = openingKeywords.concat(middleKeywords).concat(closingKeywords).concat(['#define', '#undef']);
             // Find the range of the keyword in line
             allKeywords.forEach(keyword => {
                 const k = parseKeywordRange(line, keyword);
@@ -149,7 +149,7 @@ const middleKeywords = [
 
 /**
  * @brief List of closing preprocessor directives
- */
+*/
 const closingKeywords = [
     '#endif'
 ];
@@ -198,6 +198,26 @@ function findMatchingKeywords(document: vscode.TextDocument, position: vscode.Po
         ret = temp1.concat(temp2); // Concatenate the arrays
     }
 
+    // If the cursor is on '#define' keyword, find the matching '#undef' keyword
+    if (text.startsWith('#define')) {
+        const words = text.split(' ');
+        if(words.length > 1) {
+            const definition = words[1]; // Get the definition
+            ret = searchDefinitionKeywords(document, position, Direction.Down, definition);
+        }
+        // else bad line, do nothing
+    }
+
+    // If the cursor is on '#undef' keyword, find the matching '#define' keyword
+    if (text.startsWith('#undef')) {
+        const words = text.split(' ');
+        if(words.length > 1) {
+            const definition = words[1]; // Get the definition
+            ret = searchDefinitionKeywords(document, position, Direction.Up, definition);
+        }
+        // else bad line, do nothing
+    }
+
     return ret;
 }
 
@@ -209,7 +229,7 @@ function findMatchingKeywords(document: vscode.TextDocument, position: vscode.Po
  * @returns An array of ranges containing the opening and middle keywords (if any)
  */
 function findOpeningKeyword(document: vscode.TextDocument, position: vscode.Position): vscode.Range[] {
-    return searchKeywords(document, position, Direction.Up);
+    return searchConditionalKeywords(document, position, Direction.Up);
 }
 
 /**
@@ -220,22 +240,23 @@ function findOpeningKeyword(document: vscode.TextDocument, position: vscode.Posi
  * @returns An array of ranges containing the closing and middle keywords (if any)
  */
 function findClosingKeyword(document: vscode.TextDocument, position: vscode.Position): vscode.Range[] {
-    return searchKeywords(document, position, Direction.Down);
+    return searchConditionalKeywords(document, position, Direction.Down);
 }
 
 /**
- * @brief Search for the matching preprocessor directive for the given position in the document
+ * @brief Search for the matching conditionnal preprocessor directive for the given position in the document
  * 
  * Parse the document and search for the corresponding keyword for the given position.
  * Save depth of the current keyword and search for each keyword with the same depth.
  * Stops when a opening or closing keyword (depending on the direction) is found with the same depth.
+ * Only conditional keywords are searched (#if, #ifdef, #ifndef, #elif, #else, #endif)
  * 
  * @param document  The document to search
  * @param position  The position to search from
  * @param direction  The direction to search in (0 for up, 1 for down)
  * @returns 
  */
-function searchKeywords(document: vscode.TextDocument, position: vscode.Position, direction: Direction): vscode.Range[] {
+function searchConditionalKeywords(document: vscode.TextDocument, position: vscode.Position, direction: Direction): vscode.Range[] {
     const ret: vscode.Range[] = [];
     let line = position.line + direction; // Start from the next line
     let depth = 0;
@@ -294,6 +315,56 @@ function searchKeywords(document: vscode.TextDocument, position: vscode.Position
             // Otherwise, decrease the depth
             else {
                 depth -= 1;
+            }
+        }
+
+        // Move to the next line
+        line += direction;
+    }
+
+    return ret;
+}
+
+/**
+ * @brief Search for the matching definition preprocessor directive for the given position in the document
+ * 
+ * Parse the document and search for the corresponding keyword for the given position.
+ * Only definition keywords are searched (#define or #undef)
+ * 
+ * @param document  The document to search
+ * @param position  The position to search from
+ * @param direction  The direction to search in (0 for up, 1 for down)
+ * @param definition  The definition to search for
+ * @returns  An array of ranges containing the definition keywords (if any)
+ */
+function searchDefinitionKeywords(document: vscode.TextDocument, position: vscode.Position, direction: Direction, definition: string): vscode.Range[] {
+    const ret: vscode.Range[] = [];
+    let line = position.line + direction; // Start from the next line
+    let found = false;
+
+    while ( ((line >= 0) && (line < document.lineCount)) && (!found)) {
+        // Parse the line
+        const text = document.lineAt(line).text.trim();
+        const searchedKeyword = (direction === Direction.Up) ? '#define' : '#undef';
+
+        // Look for the searched keyword
+        // Split the line into words
+        // #define xxxx : parsed = ['#define', 'xxxx']
+        // #undef xxxx :  parsed = ['#undef', 'xxxx']
+        const parsed = text.split(' '); 
+        
+        if(parsed.length <= 1){ // If there is only one word, continue
+            line += direction; // Move to the next line
+            continue;
+        }
+
+        // Check if the keyword is the one we are looking for and if the definition is the one we are looking for
+        if ( (parsed[0]===searchedKeyword) && (parsed[1] === definition) ) {
+            // Find the range of the keyword in line
+            const range = parseKeywordRange(document.lineAt(line), searchedKeyword);
+            if (range) {
+                ret.push(range); // Add the range of the keyword
+                found = true; // Stop the search
             }
         }
 
