@@ -26,6 +26,11 @@ This extension is a tool for a better visualization of preprocessor directives i
 
 ## Release Notes
 
+### 0.2.0
+
+**Added** handling of #undef directives.
+If any #undef directive is found, the corresponding #define directive is outlined (and vice versa).
+
 ### 0.1.1
 
 **Fix** outline behavior whith indentated directives and selection.
