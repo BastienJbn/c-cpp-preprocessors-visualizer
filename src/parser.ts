@@ -11,20 +11,15 @@ export function parserActivate(context: vscode.ExtensionContext) {
     // Trigger the parser on the active text editor
     if (currEditor) {
         outlinePairUnderCursor(currEditor);
+        displayHints(currEditor);
     }
 
     // On every change in the active text editor
     vscode.window.onDidChangeActiveTextEditor(editor => {
-        if(editor) {
-            console.log('Editor changed to ', vscode.workspace.asRelativePath(editor.document.fileName));
-        }
-        else {
-            console.log('Editor changed to undefined');
-        }
-
         editorChanged(editor);
         if(currEditor) {
             outlinePairUnderCursor(currEditor);
+            displayHints(currEditor);
         }
     }, null, context.subscriptions);
 
@@ -32,6 +27,7 @@ export function parserActivate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeTextDocument(event => {
         if (currEditor && (event.document === currEditor.document)) {
             outlinePairUnderCursor(currEditor);
+            displayHints(currEditor);
         }
     }, null, context.subscriptions);
 
@@ -41,13 +37,22 @@ export function parserActivate(context: vscode.ExtensionContext) {
             outlinePairUnderCursor(currEditor);
         }
     }, null, context.subscriptions);
+
+    // On every new text document opened
+    vscode.workspace.onDidOpenTextDocument(document => {
+        if(!allOpenedDocuments.includes(document)) {
+            allOpenedDocuments.push(document);
+        }
+    }, null, context.subscriptions);
+
+    // On every text document closed
+    vscode.workspace.onDidCloseTextDocument(document => {
+        allOpenedDocuments = allOpenedDocuments.filter(doc => doc !== document);
+    }, null, context.subscriptions);
 }
 
 export function parserDeactivate() {
-    // Remove the decorations from the current editor
-    if (currEditor) {
-        currEditor.setDecorations(decorationType, []);
-    }
+    // Nothing to do
 }
 
 /**
@@ -56,7 +61,7 @@ export function parserDeactivate() {
  * @param editor The text editor to highlight the pair in
  * @returns 
  */
-export async function outlinePairUnderCursor(editor: vscode.TextEditor) {
+async function outlinePairUnderCursor(editor: vscode.TextEditor) {
     // Language should be C or C++
     const languageId = editor.document.languageId;
     if ( !(languageId === 'c' || languageId === 'cpp' || languageId === 'h' || languageId === 'hpp') ) {
@@ -66,7 +71,7 @@ export async function outlinePairUnderCursor(editor: vscode.TextEditor) {
     // Should not outline when there is a selection
     const selection = editor.selection;
     if (!selection.start.isEqual(selection.end)) {
-        currEditor!.setDecorations(decorationType, []); // Remove the decorations
+        currEditor!.setDecorations(outlineDecoType, []); // Remove the decorations
         return;
     }
 
@@ -107,7 +112,54 @@ export async function outlinePairUnderCursor(editor: vscode.TextEditor) {
     }
 
     // Set the decorations to the ranges detected as matching keywords
-    editor.setDecorations(decorationType, keywordRanges);
+    editor.setDecorations(outlineDecoType, keywordRanges);
+}
+
+/**
+ * @brief Display hints for the closing preprocessor directives of the opened file
+ * 
+ * @param editor  The text editor to display the hints in
+ * @returns 
+ */
+async function displayHints(editor: vscode.TextEditor) {
+    // Language should be C or C++
+    const languageId = editor.document.languageId;
+    if ( !(languageId === 'c' || languageId === 'cpp' || languageId === 'h' || languageId === 'hpp') ) {
+        return;
+    }
+
+    const document = editor.document;
+
+    console.log('[displayHints] File:', vscode.workspace.asRelativePath(document.fileName));
+
+    // Parse the document and search for the closing preprocessor directives
+    for (let line = 0; line < document.lineCount; line++) {
+        const text = document.lineAt(line).text.trim();
+        if (text.startsWithClosingKeyword()) {
+            // Save closing range
+            var closingRange = parseKeywordRange(document.lineAt(line), text);
+            if(!closingRange) {
+                continue; // If the range is undefined, continue (should not happen)
+            }
+
+            // Find the opening keyword
+            var openingRange = findOpeningKeyword(document, new vscode.Position(line, 0)).pop();
+            if (openingRange) {
+                // Get the text after the openingRange
+                const condition = document.getText(new vscode.Range(openingRange.end, document.lineAt(line).range.end));
+                // Build the hint decoration
+                const hintDeco = vscode.window.createTextEditorDecorationType({
+                    after: {
+                        contentText: ` ${condition}`,
+                        color: 'grey',
+                        fontStyle: 'italic',
+                    },
+                });
+                editor.setDecorations(hintDeco, [closingRange]);
+                hintDecorations.push(hintDeco);
+            }
+        }
+    }
 }
 
 //###################//
@@ -115,16 +167,22 @@ export async function outlinePairUnderCursor(editor: vscode.TextEditor) {
 //###################//
 
 let currEditor: vscode.TextEditor | undefined;
+let allOpenedDocuments: vscode.TextDocument[] = [];
 
 /**
- * @brief The decoration type to use for the matching preprocessor directives
+ * @brief The decoration type to use for the outline
  */
-let decorationType: vscode.TextEditorDecorationType = 
+let outlineDecoType: vscode.TextEditorDecorationType = 
 vscode.window.createTextEditorDecorationType({
     border: '1px solid grey',  //Outline
     overviewRulerLane: vscode.OverviewRulerLane.Center,  //Show in the overview ruler
     overviewRulerColor: '#929292',  //Color
 });
+
+/**
+ * @brief The list of all added decorations of the current editor
+ */
+let hintDecorations: vscode.TextEditorDecorationType[] = [];
 
 /**
  * @brief List of opening preprocessor directives
@@ -390,14 +448,27 @@ function parseKeywordRange(line: vscode.TextLine, keyword: string): vscode.Range
     return undefined;
 }
 
-function editorChanged(editor: vscode.TextEditor | undefined) {
-    // Remove the decorations from the current editor, if any
-    if(currEditor && (currEditor !== editor)) {
-        currEditor!.setDecorations(decorationType, []);
+function editorChanged(newEditor: vscode.TextEditor | undefined) {
+    if(!newEditor) {
+        console.log('Editor changed to undefined');
+    }
+    else {
+        console.log('Editor changed to', vscode.workspace.asRelativePath(newEditor.document.fileName));
+
+        // if the current editor is not undefined or the same
+        if(currEditor && (currEditor !== newEditor)) {
+            // Remove the outline decorations
+            currEditor!.setDecorations(outlineDecoType, []);
+    
+            // Remove the hints decorations
+            hintDecorations.forEach(h => {
+                currEditor!.setDecorations(h, []);
+            });
+        }
     }
 
     // Set the new editor as the current editor
-    currEditor = editor;
+    currEditor = newEditor;
 }
 
 
