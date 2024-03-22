@@ -8,17 +8,11 @@ This extension is a tool for a better visualization of preprocessor directives i
 
 - [x] Outline conditionnal (`#if`,`#ifdef`,...) preprocessor directives when cursor is on a line containing one.
 - [x] Outline definition (`#define`) preprocessor directives when cursor is on a line containing one (and when there is a closing directive `#undef`).
-- [ ] Highlight `#define` preprocessor directives. (Useful for multiline directives)
-- [ ] Display tested conditionnal preprocessor directives next to the closing directive. e.g. :
-  <!-- Example Code -->
-    ```c
-    #ifdef TEST
-    ...
-    #endif [TEST] <- Visual hint, Greyed out
-    ```
+- [x] Display tested conditionnal preprocessor directives next to the closing directive.
+- [x] Add commands to toggle the extension behavior on/off.
 
+- [ ] Highlight `#define` preprocessor directives. (Useful for multiline directives)
 - [ ] Add settings to personalize the extension behavior.
-- [ ] Add commands to toggle the extension behavior on/off.
 
 ## Extension Settings
 
@@ -26,10 +20,16 @@ This extension is a tool for a better visualization of preprocessor directives i
 
 ## Release Notes
 
+### 0.3.0
+
+**Added** hints after `#endif` directive.
+
+**Added** settings to enable/disable the extension, enable/disable the hints and enable/disable the outlines.
+
 ### 0.2.0
 
 **Added** handling of #undef directives.
-If any #undef directive is found, the corresponding #define directive is outlined (and vice versa).
+If any `#undef` directive is found, the corresponding #define directive is outlined (and vice versa).
 
 ### 0.1.1
 
