@@ -45,7 +45,6 @@ int main() {
 
 // Definition test
 #undef A
-#undef B
 
 #undef //Bad line test
 
