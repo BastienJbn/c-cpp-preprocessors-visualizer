@@ -38,17 +38,14 @@ export function parserActivate(context: vscode.ExtensionContext) {
         }
     }, null, context.subscriptions);
 
-    // On every new text document opened
-    vscode.workspace.onDidOpenTextDocument(document => {
-        if(!allOpenedDocuments.includes(document)) {
-            allOpenedDocuments.push(document);
+    vscode.workspace.onDidChangeConfiguration(event => {
+        if (event.affectsConfiguration('c-cpp-preprocessors-visualizer')) {
+            const config = vscode.workspace.getConfiguration('c-cpp-preprocessors-visualizer');
+            isEnabled = config.get('enable', true);
+            areHintsEnabled = config.get('hints.enable', true);
+            areOutlinesEnabled = config.get('outlines.enable', true);            
         }
-    }, null, context.subscriptions);
-
-    // On every text document closed
-    vscode.workspace.onDidCloseTextDocument(document => {
-        allOpenedDocuments = allOpenedDocuments.filter(doc => doc !== document);
-    }, null, context.subscriptions);
+    });
 }
 
 export function parserDeactivate() {
@@ -62,6 +59,11 @@ export function parserDeactivate() {
  * @returns 
  */
 async function outlinePairUnderCursor(editor: vscode.TextEditor) {
+    // If the extension or the feature are disabled, do nothing
+    if (!isEnabled || !areOutlinesEnabled) {
+        return;
+    }
+
     // Language should be C or C++
     const languageId = editor.document.languageId;
     if ( !(languageId === 'c' || languageId === 'cpp' || languageId === 'h' || languageId === 'hpp') ) {
@@ -122,6 +124,11 @@ async function outlinePairUnderCursor(editor: vscode.TextEditor) {
  * @returns 
  */
 async function displayHints(editor: vscode.TextEditor) {
+    // If the extension or the feature are disabled, do nothing
+    if (!isEnabled || !areHintsEnabled) {
+        return;
+    }
+
     // Language should be C or C++
     const languageId = editor.document.languageId;
     if ( !(languageId === 'c' || languageId === 'cpp' || languageId === 'h' || languageId === 'hpp') ) {
@@ -162,9 +169,15 @@ async function displayHints(editor: vscode.TextEditor) {
     }
 }
 
-//###################//
-// Private functions //
-//###################//
+//###############//
+// Private Scope //
+//###############//
+
+// Access properties
+let isEnabled: boolean = true;
+let areHintsEnabled: boolean = true;
+let areOutlinesEnabled: boolean = true;
+
 
 let currEditor: vscode.TextEditor | undefined;
 let allOpenedDocuments: vscode.TextDocument[] = [];

@@ -25,6 +25,16 @@
           "type": "boolean",
           "default": true,
           "description": "Enable/disable this extension"
+        },
+        "c-cpp-preprocessors-visualizer.hints.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable hints"
+        },
+        "c-cpp-preprocessors-visualizer.outlines.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable outlines"
         }
       }
     }
