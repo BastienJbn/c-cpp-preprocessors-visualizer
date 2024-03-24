@@ -2,7 +2,7 @@
   "name": "c-cpp-preprocessors-visualizer",
   "displayName": "C/C++ Preprocessors Visualizer",
   "description": "Intuitive visual cues for macro and preprocessor directives",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "engines": {
     "vscode": "^1.87.0"
   },
@@ -11,7 +11,6 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:c-cpp-preprocessors-visualizer.enable",
     "onLanguage:c",
     "onLanguage:cpp"
   ],

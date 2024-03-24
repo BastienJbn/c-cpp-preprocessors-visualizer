@@ -20,6 +20,10 @@ This extension is a tool for a better visualization of preprocessor directives i
 
 ## Release Notes
 
+### 0.3.1
+
+**Fix** settings read on extension activation.
+
 ### 0.3.0
 
 **Added** hints after `#endif` directive.
