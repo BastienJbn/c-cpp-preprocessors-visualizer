@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { cfg } from './configuration';
+import { Console } from 'console';
 
 //###################//
 // Public functions //
@@ -10,46 +12,56 @@ export function parserActivate(context: vscode.ExtensionContext) {
 
     // Trigger the parser on the active text editor
     if (currEditor) {
-        outlinePairUnderCursor(currEditor);
-        displayHints(currEditor);
+        parseLineUnderCursor(currEditor);
+        parseWholeFile(currEditor);
     }
 
     // On every change in the active text editor
     vscode.window.onDidChangeActiveTextEditor(editor => {
         editorChanged(editor);
         if(currEditor) {
-            outlinePairUnderCursor(currEditor);
-            displayHints(currEditor);
+            parseLineUnderCursor(currEditor);
+            parseWholeFile(currEditor);
         }
     }, null, context.subscriptions);
 
     // On every change in the text document
     vscode.workspace.onDidChangeTextDocument(event => {
         if (currEditor && (event.document === currEditor.document)) {
-            outlinePairUnderCursor(currEditor);
-            displayHints(currEditor);
+            parseLineUnderCursor(currEditor);
+            parseWholeFile(currEditor);
         }
     }, null, context.subscriptions);
 
     // On every change in the text editor selection
     vscode.window.onDidChangeTextEditorSelection(event => {
         if (currEditor && (event.textEditor === currEditor)) {
-            outlinePairUnderCursor(currEditor);
+            parseLineUnderCursor(currEditor);
         }
     }, null, context.subscriptions);
 
     vscode.workspace.onDidChangeConfiguration(event => {
         if (event.affectsConfiguration('c-cpp-preprocessors-visualizer')) {
-            const config = vscode.workspace.getConfiguration('c-cpp-preprocessors-visualizer');
-            isEnabled = config.get('enable', true);
-            areHintsEnabled = config.get('hints.enable', true);
-            areOutlinesEnabled = config.get('outlines.enable', true);            
+            cfg.reload();         
         }
     });
 }
 
 export function parserDeactivate() {
     // Nothing to do
+}
+
+
+//###############//
+// Private Scope //
+//###############//
+
+async function parseLineUnderCursor(editor: vscode.TextEditor) {
+    outlinePairUnderCursor(editor);
+}
+
+async function parseWholeFile(editor: vscode.TextEditor) {
+    displayHints(editor);
 }
 
 /**
@@ -60,7 +72,7 @@ export function parserDeactivate() {
  */
 async function outlinePairUnderCursor(editor: vscode.TextEditor) {
     // If the extension or the feature are disabled, do nothing
-    if (!isEnabled || !areOutlinesEnabled) {
+    if (!cfg.get('enable') || !cfg.get('outlines.enable')) {
         return;
     }
 
@@ -125,7 +137,7 @@ async function outlinePairUnderCursor(editor: vscode.TextEditor) {
  */
 async function displayHints(editor: vscode.TextEditor) {
     // If the extension or the feature are disabled, do nothing
-    if (!isEnabled || !areHintsEnabled) {
+    if (!cfg.get('enable') || !cfg.get('hints.enable')) {
         return;
     }
 
@@ -169,18 +181,8 @@ async function displayHints(editor: vscode.TextEditor) {
     }
 }
 
-//###############//
-// Private Scope //
-//###############//
-
 // Access properties
-let isEnabled: boolean = true;
-let areHintsEnabled: boolean = true;
-let areOutlinesEnabled: boolean = true;
-
-
 let currEditor: vscode.TextEditor | undefined;
-let allOpenedDocuments: vscode.TextDocument[] = [];
 
 /**
  * @brief The decoration type to use for the outline
