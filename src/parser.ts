@@ -12,7 +12,7 @@ export function parserActivate(context: vscode.ExtensionContext) {
 
     // Trigger the parser on extension activation
     if (currEditor) {
-        parseLineUnderCursor(currEditor);
+        outlinePairUnderCursor(currEditor);
         parseVisibleEditors();
     }
 
@@ -29,7 +29,7 @@ export function parserActivate(context: vscode.ExtensionContext) {
     // On every change in the text document
     vscode.workspace.onDidChangeTextDocument(event => {
         if (currEditor && (event.document === currEditor.document)) {
-            parseLineUnderCursor(currEditor);
+            outlinePairUnderCursor(currEditor);
             updateHints(currEditor);
         }
     }, null, context.subscriptions);
@@ -37,7 +37,7 @@ export function parserActivate(context: vscode.ExtensionContext) {
     // On every change in the text editor selection
     vscode.window.onDidChangeTextEditorSelection(event => {
         if (currEditor && (event.textEditor === currEditor)) {
-            parseLineUnderCursor(currEditor);
+            outlinePairUnderCursor(currEditor);
         }
     }, null, context.subscriptions);
 
@@ -132,10 +132,6 @@ const enum Direction {
     Down = 1
 }
 
-
-async function parseLineUnderCursor(editor: vscode.TextEditor) {
-    outlinePairUnderCursor(editor);
-}
 
 async function parseWholeFile(editor: vscode.TextEditor) {
     updateHints(editor);
@@ -568,7 +564,7 @@ function editorChanged(newEditor: vscode.TextEditor | undefined) {
     else {
         console.log('Editor changed to', vscode.workspace.asRelativePath(newEditor.document.fileName));
 
-        parseLineUnderCursor(newEditor);
+        outlinePairUnderCursor(newEditor);
     }
 
     removeOutlines();
