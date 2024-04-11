@@ -1,28 +1,32 @@
 import * as vscode from 'vscode';
-import { cfg } from './configuration';
-import { Console } from 'console';
+import { extensionId } from './misc';
 
-//###################//
-// Public functions //
-//###################//
+//##############//
+// Public Scope //
+//##############//
 
 export function parserActivate(context: vscode.ExtensionContext) {
     // variables init
     currEditor = vscode.window.activeTextEditor;
+    visibleEditors = [...vscode.window.visibleTextEditors];
 
-    // Trigger the parser on the active text editor
+    // Trigger the parser on extension activation
     if (currEditor) {
         parseLineUnderCursor(currEditor);
-        parseWholeFile(currEditor);
+        parseWholeWorkspace();
     }
 
-    // On every change in the active text editor
+    // On every change of the active text editor
     vscode.window.onDidChangeActiveTextEditor(editor => {
         editorChanged(editor);
-        if(currEditor) {
+        if(currEditor !== undefined) {
             parseLineUnderCursor(currEditor);
-            parseWholeFile(currEditor);
         }
+    }, null, context.subscriptions);
+    
+    // On every change of the visible text editors
+    vscode.window.onDidChangeVisibleTextEditors(editors => {
+        visibleEditorsChanged(editors);
     }, null, context.subscriptions);
 
     // On every change in the text document
@@ -40,15 +44,18 @@ export function parserActivate(context: vscode.ExtensionContext) {
         }
     }, null, context.subscriptions);
 
+    // On every change in the configuration (settings)
     vscode.workspace.onDidChangeConfiguration(event => {
-        if (event.affectsConfiguration('c-cpp-preprocessors-visualizer')) {
-            cfg.reload();         
+        if (event.affectsConfiguration(extensionId)) {
+            removeHints(visibleEditors); // Remove all hints
+            parseWholeWorkspace(); // Parse the whole workspace
         }
-    });
+    }, null, context.subscriptions);    
 }
 
 export function parserDeactivate() {
-    // Nothing to do
+    removeHints(visibleEditors);  // Remove all hints
+    removeOutlines();             // Remove all outlines
 }
 
 
@@ -56,133 +63,10 @@ export function parserDeactivate() {
 // Private Scope //
 //###############//
 
-async function parseLineUnderCursor(editor: vscode.TextEditor) {
-    outlinePairUnderCursor(editor);
-}
-
-async function parseWholeFile(editor: vscode.TextEditor) {
-    displayHints(editor);
-}
-
-/**
- * @brief Highlight the matching preprocessor directives under the cursor (if any)
- * 
- * @param editor The text editor to highlight the pair in
- * @returns 
- */
-async function outlinePairUnderCursor(editor: vscode.TextEditor) {
-    // If the extension or the feature are disabled, do nothing
-    if (!cfg.get('enable') || !cfg.get('outlines.enable')) {
-        return;
-    }
-
-    // Language should be C or C++
-    const languageId = editor.document.languageId;
-    if ( !(languageId === 'c' || languageId === 'cpp' || languageId === 'h' || languageId === 'hpp') ) {
-        return;
-    }
-
-    // Should not outline when there is a selection
-    const selection = editor.selection;
-    if (!selection.start.isEqual(selection.end)) {
-        currEditor!.setDecorations(outlineDecoType, []); // Remove the decorations
-        return;
-    }
-
-    const position = editor.selection.active;
-    const line = editor.document.lineAt(position.line);
-    const text = line.text.trim();
-    const keywordRanges: vscode.Range[] = [];
-
-    console.log('[outlinePairUnderCursor] File:', vscode.workspace.asRelativePath(editor.document.fileName), 
-                '  Ln:', position.line.toString().padStart(4, '0'), 
-                '  Col:', position.character.toString().padStart(4, '0'), 
-                '  Parsed: "', text, '"');
-
-    // Check if the cursor is on a directive
-    if (text.startsWith('#')) {
-        // Find matching keywords
-        const matchingKeywords = findMatchingKeywords(editor.document, position);
-        // Add the matching keywords to the list of ranges
-        keywordRanges.push(...matchingKeywords);
-
-        // If matching keywords were found, add the current line to the decorations
-        if (matchingKeywords.length > 0) {
-            // Make an array of all the keywords
-            const allKeywords = openingKeywords.concat(middleKeywords).concat(closingKeywords).concat(['#define', '#undef']);
-            // Find the range of the keyword in line
-            allKeywords.forEach(keyword => {
-                const k = parseKeywordRange(line, keyword);
-                if (k) {
-                    keywordRanges.push(k);
-                }
-            });
-        }
-
-        // If no matching keywords were found, no decorations are added
-    }
-    else {
-        console.log('[outlinePairUnderCursor] No preprocessor directive found');
-    }
-
-    // Set the decorations to the ranges detected as matching keywords
-    editor.setDecorations(outlineDecoType, keywordRanges);
-}
-
-/**
- * @brief Display hints for the closing preprocessor directives of the opened file
- * 
- * @param editor  The text editor to display the hints in
- * @returns 
- */
-async function displayHints(editor: vscode.TextEditor) {
-    // If the extension or the feature are disabled, do nothing
-    if (!cfg.get('enable') || !cfg.get('hints.enable')) {
-        return;
-    }
-
-    // Language should be C or C++
-    const languageId = editor.document.languageId;
-    if ( !(languageId === 'c' || languageId === 'cpp' || languageId === 'h' || languageId === 'hpp') ) {
-        return;
-    }
-
-    const document = editor.document;
-
-    console.log('[displayHints] File:', vscode.workspace.asRelativePath(document.fileName));
-
-    // Parse the document and search for the closing preprocessor directives
-    for (let line = 0; line < document.lineCount; line++) {
-        const text = document.lineAt(line).text.trim();
-        if (text.startsWithClosingKeyword()) {
-            // Save closing range
-            var closingRange = parseKeywordRange(document.lineAt(line), text);
-            if(!closingRange) {
-                continue; // If the range is undefined, continue (should not happen)
-            }
-
-            // Find the opening keyword
-            var openingRange = findOpeningKeyword(document, new vscode.Position(line, 0)).pop();
-            if (openingRange) {
-                // Get the text after the openingRange
-                const condition = document.getText(new vscode.Range(openingRange.end, document.lineAt(line).range.end));
-                // Build the hint decoration
-                const hintDeco = vscode.window.createTextEditorDecorationType({
-                    after: {
-                        contentText: ` ${condition}`,
-                        color: 'grey',
-                        fontStyle: 'italic',
-                    },
-                });
-                editor.setDecorations(hintDeco, [closingRange]);
-                hintDecorations.push(hintDeco);
-            }
-        }
-    }
-}
-
 // Access properties
-let currEditor: vscode.TextEditor | undefined;
+let currEditor: vscode.TextEditor | undefined = undefined;
+//List of visible editors
+let visibleEditors: vscode.TextEditor[] = [];
 
 /**
  * @brief The decoration type to use for the outline
@@ -233,6 +117,173 @@ const closingKeywords = [
 const enum Direction {
     Up = -1,
     Down = 1
+}
+
+
+async function parseLineUnderCursor(editor: vscode.TextEditor) {
+    outlinePairUnderCursor(editor);
+}
+
+async function parseWholeFile(editor: vscode.TextEditor) {
+    displayHints(editor);
+}
+
+async function parseWholeWorkspace() {
+    // If 'activeEditorOnly' is set to true, only parse the current editor
+    const cfg = vscode.workspace.getConfiguration(extensionId);
+    if (cfg.get('hints.activeEditorOnly')) {
+        if (currEditor) {
+            parseWholeFile(currEditor);
+        }
+    }
+    // Otherwise, parse all visible editors
+    else {
+        visibleEditors.forEach(e => {
+            parseWholeFile(e);
+        });
+    }
+}
+
+/**
+ * @brief Highlight the matching preprocessor directives under the cursor (if any)
+ * 
+ * @param editor The text editor to highlight the pair in
+ * @returns 
+ */
+function outlinePairUnderCursor(editor: vscode.TextEditor) {
+    // If the extension or the feature are disabled, do nothing
+    const cfg = vscode.workspace.getConfiguration(extensionId);
+    if (!cfg.get('enable') || !cfg.get('outlines.enable')) {
+        return;
+    }
+
+    // Language should be C or C++
+    const languageId = editor.document.languageId;
+    if ( !(languageId === 'c' || languageId === 'cpp' || languageId === 'h' || languageId === 'hpp') ) {
+        return;
+    }
+
+    // Should not outline when there is a selection
+    const selection = editor.selection;
+    if (!selection.start.isEqual(selection.end)) {
+        editor.setDecorations(outlineDecoType, []); // Remove the decorations
+        return;
+    }
+
+    const position = editor.selection.active;
+    const line = editor.document.lineAt(position.line);
+    const text = line.text.trim();
+    const keywordRanges: vscode.Range[] = [];
+
+    console.log('[outlinePairUnderCursor] File:', vscode.workspace.asRelativePath(editor.document.fileName), 
+                '  Ln:', position.line.toString().padStart(4, '0'), 
+                '  Col:', position.character.toString().padStart(4, '0'), 
+                '  Parsed: "', text, '"');
+
+    // Check if the cursor is on a directive
+    if (text.startsWith('#')) {
+        // Find matching keywords
+        const matchingKeywords = findMatchingKeywords(editor.document, position);
+        // Add the matching keywords to the list of ranges
+        keywordRanges.push(...matchingKeywords);
+
+        // If matching keywords were found, add the current line to the decorations
+        if (matchingKeywords.length > 0) {
+            // Make an array of all the keywords
+            const allKeywords = openingKeywords.concat(middleKeywords).concat(closingKeywords).concat(['#define', '#undef']);
+            // Find the range of the keyword in line
+            allKeywords.forEach(keyword => {
+                const k = getKeywordRange(line, keyword);
+                if (k) {
+                    keywordRanges.push(k);
+                }
+            });
+        }
+        // If no matching keywords were found, no decorations are added
+    }
+    else {
+        console.log('[outlinePairUnderCursor] No preprocessor directive found');
+    }
+
+    // Set the decorations to the ranges detected as matching keywords
+    editor.setDecorations(outlineDecoType, keywordRanges);
+}
+
+/**
+ * @brief Remove all the outline decorations from the current editor
+ */
+function removeOutlines() {
+    if (currEditor) {
+        currEditor.setDecorations(outlineDecoType, []);
+    }
+}
+
+/**
+ * @brief Display hints for the closing preprocessor directives of the opened file
+ * 
+ * @param editor  The text editor to display the hints in
+ * @returns 
+ */
+function displayHints(editor: vscode.TextEditor) {
+    // If the extension or the feature are disabled, do nothing
+    const cfg = vscode.workspace.getConfiguration(extensionId);
+    if (!cfg.get('enable') || !cfg.get('hints.enable')) {
+        return;
+    }
+
+    // Language should be C or C++
+    const languageId = editor.document.languageId;
+    if ( !(languageId === 'c' || languageId === 'cpp' || languageId === 'h' || languageId === 'hpp') ) {
+        return;
+    }
+
+    const document = editor.document;
+
+    console.log('[displayHints] File:', vscode.workspace.asRelativePath(document.fileName));
+
+    // Parse the document and search for the closing preprocessor directives
+    for (let line = 0; line < document.lineCount; line++) {
+        const text = document.lineAt(line).text.trim();
+        if (text.startsWithClosingKeyword()) {
+            // Save closing range
+            var closingRange = getKeywordRange(document.lineAt(line), text);
+            if(!closingRange) {
+                continue; // If the range is undefined, continue (should not happen)
+            }
+
+            // Find the opening keyword
+            var openingRange = findOpeningKeyword(document, new vscode.Position(line, 0)).pop();
+            if (openingRange) {
+                // Get the text after the openingRange
+                const condition = document.getText(new vscode.Range(openingRange.end, document.lineAt(line).range.end));
+                // Build the hint decoration
+                const hintDeco = vscode.window.createTextEditorDecorationType({
+                    after: {
+                        contentText: ` ${condition}`,
+                        color: 'grey',
+                        fontStyle: 'italic',
+                    },
+                });
+                editor.setDecorations(hintDeco, [closingRange]);
+                hintDecorations.push(hintDeco);
+            }
+        }
+    }
+}
+
+/**
+ * @brief Remove all the hint decorations from the current editor
+ */
+function removeHints(editor: vscode.TextEditor | vscode.TextEditor[]) {
+    // Ensure we always work with an array
+    const editors = Array.isArray(editor) ? editor : [editor];
+
+    editors.forEach(e => {
+        hintDecorations.forEach(h => {
+            e.setDecorations(h, []);
+        });
+    });
+    hintDecorations = [];
 }
 
 /*
@@ -331,13 +382,13 @@ function findClosingKeyword(document: vscode.TextDocument, position: vscode.Posi
  */
 function searchConditionalKeywords(document: vscode.TextDocument, position: vscode.Position, direction: Direction): vscode.Range[] {
     const ret: vscode.Range[] = [];
-    let line = position.line + direction; // Start from the next line
+    let lineNb = position.line + direction; // Start from the next line
     let depth = 0;
     let found = false;
 
-    while ( (line >= 0 && line < document.lineCount) && (!found)) {
+    while ( (lineNb >= 0 && lineNb < document.lineCount) && (!found)) {
         // Parse the line
-        const text = document.lineAt(line).text.trim();
+        const text = document.lineAt(lineNb).text.trim();
 
         // Opening keyword detected
         if ( text.startsWithOpeningKeyword() ) {
@@ -345,7 +396,7 @@ function searchConditionalKeywords(document: vscode.TextDocument, position: vsco
             if ( (direction === Direction.Up) && (depth === 0) ) {
                 // Find the range of the keyword in line
                 openingKeywords.forEach(keyword => {
-                    const range = parseKeywordRange(document.lineAt(line), keyword);
+                    const range = getKeywordRange(document.lineAt(lineNb), keyword);
                     if (range) {
                         ret.push(range); // Add the range of the keyword
                     }
@@ -364,7 +415,7 @@ function searchConditionalKeywords(document: vscode.TextDocument, position: vsco
             if (depth === 0) {
                 // Find the range of the keyword in line
                 middleKeywords.forEach(keyword => {
-                    const range = parseKeywordRange(document.lineAt(line), keyword);
+                    const range = getKeywordRange(document.lineAt(lineNb), keyword);
                     if (range) {
                         ret.push(range); // Add the range of the keyword
                     }
@@ -378,7 +429,7 @@ function searchConditionalKeywords(document: vscode.TextDocument, position: vsco
             if ( (direction === Direction.Down) && (depth === 0) ) {
                 // Find the range of the keyword in line
                 closingKeywords.forEach(keyword => {
-                    const range = parseKeywordRange(document.lineAt(line), keyword);
+                    const range = getKeywordRange(document.lineAt(lineNb), keyword);
                     if (range) {
                         ret.push(range); // Add the range of the keyword
                     }
@@ -392,7 +443,7 @@ function searchConditionalKeywords(document: vscode.TextDocument, position: vsco
         }
 
         // Move to the next line
-        line += direction;
+        lineNb += direction;
     }
 
     return ret;
@@ -434,7 +485,7 @@ function searchDefinitionKeywords(document: vscode.TextDocument, position: vscod
         // Check if the keyword is the one we are looking for and if the definition is the one we are looking for
         if ( (parsed[0]===searchedKeyword) && (parsed[1] === definition) ) {
             // Find the range of the keyword in line
-            const range = parseKeywordRange(document.lineAt(line), searchedKeyword);
+            const range = getKeywordRange(document.lineAt(line), searchedKeyword);
             if (range) {
                 ret.push(range); // Add the range of the keyword
                 found = true; // Stop the search
@@ -455,7 +506,7 @@ function searchDefinitionKeywords(document: vscode.TextDocument, position: vscod
  * @param keyword The keyword to search for
  * @returns The range of the keyword if found, undefined otherwise
  */
-function parseKeywordRange(line: vscode.TextLine, keyword: string): vscode.Range | undefined {
+function getKeywordRange(line: vscode.TextLine, keyword: string): vscode.Range | undefined {
     const index = line.text.indexOf(keyword);
     if (index !== -1) {
         return new vscode.Range(line.lineNumber, index, line.lineNumber, index + keyword.length);
@@ -469,21 +520,43 @@ function editorChanged(newEditor: vscode.TextEditor | undefined) {
     }
     else {
         console.log('Editor changed to', vscode.workspace.asRelativePath(newEditor.document.fileName));
+    }
 
-        // if the current editor is not undefined or the same
-        if(currEditor && (currEditor !== newEditor)) {
-            // Remove the outline decorations
-            currEditor!.setDecorations(outlineDecoType, []);
-    
-            // Remove the hints decorations
-            hintDecorations.forEach(h => {
-                currEditor!.setDecorations(h, []);
-            });
+    removeOutlines();
+
+    // Remove the hints if the setting is set to activeEditorOnly and parse the new file
+    const cfg = vscode.workspace.getConfiguration(extensionId);
+    if (cfg.get('hints.activeEditorOnly')) {
+        if(currEditor) {
+            removeHints(currEditor);
+        }
+        if(newEditor) {
+            parseWholeFile(newEditor);
         }
     }
 
     // Set the new editor as the current editor
     currEditor = newEditor;
+}
+
+function visibleEditorsChanged(newEditors: readonly vscode.TextEditor[]) {
+    console.log('Visible editors changed');
+
+    // Compare differences between the old and new visible editors
+    const oldEditors = visibleEditors;
+    const addedEditors = newEditors.filter(e => !oldEditors.includes(e));
+    const removedEditors = oldEditors.filter(e => !newEditors.includes(e));
+
+    // Process removed editors
+    if (removedEditors.length > 0) {
+        visibleEditors = visibleEditors.filter(e => !removedEditors.includes(e));  // Remove the missing editors from list
+    }
+
+    // Process added editors
+    addedEditors.forEach(e => {
+        visibleEditors.push(e);  // Add the new editors to the list
+        parseWholeFile(e);  // Parse the whole file
+    });
 }
 
 
