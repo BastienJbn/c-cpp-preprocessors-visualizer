@@ -14,7 +14,7 @@ int main() {
 // Middle keywords test
 #ifdef A
     int a = 1;
-#elif defined B
+#elif defined NOT
 
 #ifdef C
     int c = 1;

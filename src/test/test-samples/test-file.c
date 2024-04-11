@@ -1,5 +1,5 @@
 #define A 1
-#define B 1
+#define B 1  // No undef, should not be outlined
 
 // Off screen test
 #ifdef A
@@ -12,7 +12,8 @@ int main() {
     int a = 1;
 
 // Middle keywords test
-#ifdef A
+#ifdef NOT
+    // Should not be defined
     int a = 1;
 #elif defined B
 
@@ -46,7 +47,7 @@ int main() {
 // Definition test
 #undef A
 
-#undef //Bad line test
+#undef NOT //No pair test, should not be outlined
 
 
 

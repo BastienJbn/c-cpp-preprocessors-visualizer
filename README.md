@@ -19,28 +19,35 @@ This extension is a tool for a better visualization of preprocessor directives i
 - `c-cpp-preprocessors-visualizer.enable`: Enable/disable this extension.
 - `c-cpp-preprocessors-visualizer.outlines.enable`: Enable/disable hints after `#endif` directives.
 - `c-cpp-preprocessors-visualizer.hints.enable`: Enable/disable outlines of preprocessor directives.
+- `c-cpp-preprocessors-visualizer.hints.activeEditorOnly`: Display hints only in the editor your cursor is in.
 
 ## Release Notes
 
+### 0.3.2
+
+- **Added** 'hints.activeEditorOnly' setting to only show hints for the active editor.
+- **Added** parseVisibleEditors function to parse all visible editors.
+- **Fix** behaviour when settings changes.
+- **Fix** multi editors bugs (duplicated hints or not showed).
+
 ### 0.3.1
 
-**Fix** settings read on extension activation.
+- **Fix** settings read on extension activation.
 
 ### 0.3.0
 
-**Added** hints after `#endif` directive.
-
-**Added** settings to enable/disable the extension, enable/disable the hints and enable/disable the outlines.
+- **Added** hints after `#endif` directive.
+- **Added** settings to enable/disable the extension, enable/disable the hints and enable/disable the outlines.
 
 ### 0.2.0
 
-**Added** handling of #undef directives.
+- **Added** handling of #undef directives.
 If any `#undef` directive is found, the corresponding `#define` directive is outlined (and vice versa).
 
 ### 0.1.1
 
-**Fix** outline behavior whith indentated directives and selection.
+- **Fix** outline behavior whith indentated directives and selection.
 
 ### 0.1.0
-<!-- bold -->
-**Initial release** of C/C++ Preprocessors Visualizer. Main feature is the outline of conditionnal preprocessor directives.
+
+- **Initial release** of C/C++ Preprocessors Visualizer. Main feature is the outline of conditionnal preprocessor directives.
