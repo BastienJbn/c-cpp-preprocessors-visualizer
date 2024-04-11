@@ -13,15 +13,12 @@ export function parserActivate(context: vscode.ExtensionContext) {
     // Trigger the parser on extension activation
     if (currEditor) {
         parseLineUnderCursor(currEditor);
-        parseWholeWorkspace();
+        parseVisibleEditors();
     }
 
     // On every change of the active text editor
     vscode.window.onDidChangeActiveTextEditor(editor => {
         editorChanged(editor);
-        if(currEditor !== undefined) {
-            parseLineUnderCursor(currEditor);
-        }
     }, null, context.subscriptions);
     
     // On every change of the visible text editors
@@ -33,7 +30,7 @@ export function parserActivate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeTextDocument(event => {
         if (currEditor && (event.document === currEditor.document)) {
             parseLineUnderCursor(currEditor);
-            parseWholeFile(currEditor);
+            updateHints(currEditor);
         }
     }, null, context.subscriptions);
 
@@ -48,7 +45,7 @@ export function parserActivate(context: vscode.ExtensionContext) {
     vscode.workspace.onDidChangeConfiguration(event => {
         if (event.affectsConfiguration(extensionId)) {
             removeHints(visibleEditors); // Remove all hints
-            parseWholeWorkspace(); // Parse the whole workspace
+            parseVisibleEditors(); // Parse the whole workspace
         }
     }, null, context.subscriptions);    
 }
@@ -63,9 +60,9 @@ export function parserDeactivate() {
 // Private Scope //
 //###############//
 
-// Access properties
+// Active editor. Where the cursor is currently located
 let currEditor: vscode.TextEditor | undefined = undefined;
-//List of visible editors
+// List of visible editors
 let visibleEditors: vscode.TextEditor[] = [];
 
 /**
@@ -79,9 +76,25 @@ vscode.window.createTextEditorDecorationType({
 });
 
 /**
- * @brief The list of all added decorations of the current editor
+ * @typedef Hint
+ * 
+ * @brief A tuple representing a hint in the text editor.
+ * 
+ * @property {vscode.TextEditorDecorationType} 0 - The decoration type for the hint.
+ * @property {vscode.Range} 1 - The range in the text editor where the hint is applied.
  */
-let hintDecorations: vscode.TextEditorDecorationType[] = [];
+type Hint = [vscode.TextEditorDecorationType, vscode.Range];
+
+/**
+ * @var hintsMap
+ * 
+ * @brief A map where each key is a vscode.TextEditor and each value is an array of Hint objects.
+ * 
+ * @details This map is used to keep track of the hints for each visible text editor.
+ * 
+ * @type {Map<vscode.TextEditor, Hint[]>}
+ */
+let hintsMap: Map<vscode.TextEditor, Hint[]> = new Map();
 
 /**
  * @brief List of opening preprocessor directives
@@ -125,10 +138,10 @@ async function parseLineUnderCursor(editor: vscode.TextEditor) {
 }
 
 async function parseWholeFile(editor: vscode.TextEditor) {
-    displayHints(editor);
+    updateHints(editor);
 }
 
-async function parseWholeWorkspace() {
+async function parseVisibleEditors() {
     // If 'activeEditorOnly' is set to true, only parse the current editor
     const cfg = vscode.workspace.getConfiguration(extensionId);
     if (cfg.get('hints.activeEditorOnly')) {
@@ -199,7 +212,6 @@ function outlinePairUnderCursor(editor: vscode.TextEditor) {
                 }
             });
         }
-        // If no matching keywords were found, no decorations are added
     }
     else {
         console.log('[outlinePairUnderCursor] No preprocessor directive found');
@@ -219,22 +231,35 @@ function removeOutlines() {
 }
 
 /**
- * @brief Display hints for the closing preprocessor directives of the opened file
+ * @brief Update the hint under the cursor (add, delete or modify)
+ * @param editor  The text editor to update
+ */
+function updateHints(editor: vscode.TextEditor) {
+    let hints = parseHints(editor);
+    removeHints(editor);
+    displayHints(editor, hints);
+}
+
+/**
+ * @brief Parse the document and search for the hints to display
  * 
  * @param editor  The text editor to display the hints in
- * @returns 
+ * @returns  Array of Hint tuples
  */
-function displayHints(editor: vscode.TextEditor) {
+function parseHints(editor: vscode.TextEditor): Hint[] {
+    // Create the return value
+    let ret: Hint[] = [];
+
     // If the extension or the feature are disabled, do nothing
     const cfg = vscode.workspace.getConfiguration(extensionId);
     if (!cfg.get('enable') || !cfg.get('hints.enable')) {
-        return;
+        return ret;
     }
 
     // Language should be C or C++
     const languageId = editor.document.languageId;
     if ( !(languageId === 'c' || languageId === 'cpp' || languageId === 'h' || languageId === 'hpp') ) {
-        return;
+        return ret;
     }
 
     const document = editor.document;
@@ -264,26 +289,45 @@ function displayHints(editor: vscode.TextEditor) {
                         fontStyle: 'italic',
                     },
                 });
-                editor.setDecorations(hintDeco, [closingRange]);
-                hintDecorations.push(hintDeco);
+                ret.push([hintDeco, closingRange]);
             }
         }
     }
+
+    return ret;
 }
 
 /**
- * @brief Remove all the hint decorations from the current editor
+ * @brief Display the hints in the given text editor
+ * 
+ * @param editor  The text editor to display the hints in
+ */
+function displayHints(editor: vscode.TextEditor, hints: Hint[]) {
+    // Ensure we always work with an array
+    const hintList = Array.isArray(hints) ? hints : [hints];
+
+    // Display the hints in the given editor
+    hintList.forEach(h => {
+        editor.setDecorations(h[0], [h[1]]);
+        hintsMap.get(editor)?.push(h);
+    });
+}
+
+/**
+ * @brief Remove all the hint decorations from the given editor
  */
 function removeHints(editor: vscode.TextEditor | vscode.TextEditor[]) {
     // Ensure we always work with an array
     const editors = Array.isArray(editor) ? editor : [editor];
 
+    // Remove the hints from the given editors
     editors.forEach(e => {
-        hintDecorations.forEach(h => {
-            e.setDecorations(h, []);
+        hintsMap.get(e)?.forEach(h => {
+            e.setDecorations(h[0], []);
+            h[0].dispose();
         });
+        hintsMap.set(e, []);
     });
-    hintDecorations = [];
 }
 
 /*
@@ -341,6 +385,9 @@ function findMatchingKeywords(document: vscode.TextDocument, position: vscode.Po
         }
         // else bad line, do nothing
     }
+
+    // Sort the ranges by line number
+    ret.sort((a, b) => a.start.line - b.start.line);
 
     return ret;
 }
@@ -520,6 +567,8 @@ function editorChanged(newEditor: vscode.TextEditor | undefined) {
     }
     else {
         console.log('Editor changed to', vscode.workspace.asRelativePath(newEditor.document.fileName));
+
+        parseLineUnderCursor(newEditor);
     }
 
     removeOutlines();
