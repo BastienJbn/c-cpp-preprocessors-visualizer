@@ -47,9 +47,8 @@ int main() {
 // Definition test
 #undef A
 
+#undef //Bad line test
 #undef NOT //No pair test, should not be outlined
-
-
 
 
 
