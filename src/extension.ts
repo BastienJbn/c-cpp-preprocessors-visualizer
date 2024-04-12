@@ -1,12 +1,15 @@
 import * as vscode from 'vscode';
-import { parserActivate, parserDeactivate } from "./parser";
+import { Parser } from "./Parser";
+
+let parser: Parser;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('[DEBUG]', 'Extension is active');
-    parserActivate(context);
+    parser = new Parser();
+    parser.activate(context);
 }
 
 export function deactivate() {
     console.log('[DEBUG]', 'Extension is deactivated');
-    parserDeactivate();
+    parser.deactivate();
 }
