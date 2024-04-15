@@ -4,6 +4,7 @@ import * as dico from './dico';
 import { extensionId } from './misc';
 import { Hint } from './Hint';
 import { DirectiveGroup } from './DirectiveGroup';
+import { Directive } from './Directive';
 
 /**
  * @brief Enum to represent the direction of the search
@@ -22,7 +23,6 @@ export class Parser {
         // Initialize attributes
         this.currEditor = vscode.window.activeTextEditor;
         this.visibleEditors = [...vscode.window.visibleTextEditors];
-        this.hintsMap = new Map();
         this.dataMap = new Map();
     }
     
@@ -39,6 +39,7 @@ export class Parser {
         if (this.currEditor) {
             this.parseVisibleEditors();
             this.outlineUnderCursor(this.currEditor);
+            this.displayHints(this.currEditor);
         }
     
         // On every change of the active text editor
@@ -56,6 +57,7 @@ export class Parser {
             if (this.currEditor && (event.document === this.currEditor.document)) {
                 this.outlineUnderCursor(this.currEditor);
                 this.updateHints(this.currEditor);
+                this.displayHints(this.currEditor);
             }
         }, null, context.subscriptions);
     
@@ -71,6 +73,7 @@ export class Parser {
             if (event.affectsConfiguration(extensionId)) {
                 this.removeHints(this.visibleEditors); // Remove all hints
                 this.parseVisibleEditors();
+                this.displayHints(this.visibleEditors); // Display all hints
             }
         }, null, context.subscriptions);
     }
@@ -120,14 +123,6 @@ export class Parser {
     });
 
     /**
-     * @var hintsMap
-     * @brief A map where each key is a vscode.TextEditor and each value is an array of Hint objects.
-     * @details This map is used to keep track of the hints for each visible text editor.
-     * @type {Map<vscode.TextEditor, Hint[]>}
-     */
-    private hintsMap: Map<vscode.TextEditor, Hint[]>;
-
-    /**
      * @var dataMap
      * @brief A map where each key is a vscode.TextEditor and each value is a DirectiveGroup Array.
      * @type {Map<vscode.TextEditor, DirectiveGroup[]>}
@@ -144,7 +139,7 @@ export class Parser {
     /**
      * @brief Parse the visible editors
      */
-    async parseVisibleEditors() {
+    parseVisibleEditors() {
         // If 'activeEditorOnly' is set to true, only parse the current editor
         const cfg = vscode.workspace.getConfiguration(extensionId);
         if (cfg.get('hints.activeEditorOnly')) {
@@ -164,10 +159,9 @@ export class Parser {
      * @brief Parse the whole file
      * @param editor The text editor to parse
      */
-    async parseEditor(editor: vscode.TextEditor) {
-        // this.updateHints(editor);
+    parseEditor(editor: vscode.TextEditor) {
         const doc = editor.document;
-        const groups = await this.parseFile(doc);
+        const groups = this.parseFile(doc);
         this.dataMap.set(editor, groups);
     }
 
@@ -176,7 +170,7 @@ export class Parser {
      * @param document The document to parse
      * @returns An array of DirectiveGroup objects. Can be empty.
      */
-    async parseFile(document: vscode.TextDocument): Promise<DirectiveGroup[]> {
+    parseFile(document: vscode.TextDocument): DirectiveGroup[] {
         let ret: DirectiveGroup[] = [];
 
         console.log('[parseFile] File:', vscode.workspace.asRelativePath(document.fileName));
@@ -194,29 +188,23 @@ export class Parser {
             // Opening keyword detected
             if (text.startsWithOpeningKeyword()) {
                 // Create a new group
-                const newGroup = new DirectiveGroup([], text, undefined, currLevel);
+                const newGroup = new DirectiveGroup([], currLevel);
 
                 // Find the range of the keyword in line
-                dico.openingKeywords.forEach(keyword => {
-                    const k = getKeywordRange(document.lineAt(line), keyword);
-                    if (k) {
-                        newGroup.directives.push(k);
-                    }
-                });
+                let range = getKeywordRange(document.lineAt(line), dico.openingKeywords)!;
 
-                // Find the condition string
-                const words = text.split(' ');
-                if (words.length > 1) {
-                    newGroup.conditionStr = words.slice(1).join(' ');
-                }
+                // Find the param string
+                let paramStr = getConditionText(document.lineAt(line));
 
-                // Determine the closing hint string. If the opening directive is negated, add a '!' in front of the string.
+                // Find the hint
+                let hint = new Hint(paramStr);
                 if (text.startsWith('#ifndef') || text.startsWith('#if !defined') || text.startsWith('#ifneq')) {
-                    let h = new Hint(newGroup.directives[0], '!' + newGroup.conditionStr);
+                    hint.NegateString();
                 }
-                else {
-                    let h = new Hint(newGroup.directives[0], newGroup.conditionStr);
-                }
+                
+                // Create the Directive object
+                const directive = new Directive(range, paramStr, hint);
+                newGroup.directives.push(directive);
 
                 // Add the new group to the current groups
                 currGroups.push(newGroup);
@@ -230,47 +218,65 @@ export class Parser {
                 if (currGroups) {
                     const group = currGroups[currGroups.length - 1];
 
-                    // Add the directive to the current group
-                    group.directives.push(new vscode.Range(line, 0, line, text.length));
+                    // Find the directive range
+                    let range = getKeywordRange(document.lineAt(line), dico.middleKeywords)!;
 
-                    // Add the hint string to the current group, corresponding to the keyword
+                    // Find the param string
+                    let paramStr = getConditionText(document.lineAt(line));
+
+                    // Find the hint
+                    let hint = new Hint("");
                     if (text.startsWith('#else')) {
-                        // Hint str is the negation of the condition
-                        let h = new Hint(new vscode.Range(line, 0, line, text.length), '!' + group.conditionStr);
-                        // Add the hint before the last element of the hint array
-                        group.hintArr.splice(group.hintArr.length - 1, 0, h);
+                        // Hint str is the negation of the last directive hint
+                        hint.Text = group.directives[group.directives.length - 1].hint.Text;
+                        hint.NegateString();
                     }
                     else if (text.startsWith('#elif')) {
                         // Hint str is the new condition
-                        const words = text.split(' ');
-                        if (words.length > 1) {
-                            let h = new Hint(new vscode.Range(line, 0, line, text.length), words.slice(1).join(' '));
-                            // Add the hint before the last element of the hint array
-                            group.hintArr.splice(group.hintArr.length - 1, 0, h);
-                        }
+                        let hintText = getConditionText(document.lineAt(line));
+                        hint.Text = hintText;
+                        hint.modified = true;
                     }
+
+                    // Create the Directive object
+                    const directive = new Directive(range, paramStr, hint);
+
+                    // Add the directive to the group
+                    group.directives.push(directive);
                 }
                 else {
-                    // TODO: Indicate bad syntax
+                    // TODO: Indicate bad syntax with squiggly underline
                 }
             }
 
             // Closing keyword detected
             else if (text.startsWithClosingKeyword()) {
                 if (currGroups) {
-                    // Add the directive to the current group
-                    currGroups[currGroups.length - 1].directives.push(new vscode.Range(line, 0, line, text.length));
+                    // Find the directive range
+                    let range = getKeywordRange(document.lineAt(line), dico.closingKeywords)!;
 
-                    // Group is completed, add it to the return value
-                    const lastGroup = currGroups.pop();
-                    if (lastGroup) {
-                        if (lastGroup.directives.length > 0) {
-                            ret.push(lastGroup);
-                        }
-                    }
+                    // Find the param string
+                    let paramStr = getConditionText(document.lineAt(line));
+
+                    // Find the hint. Text is equal to the last directive hint
+                    let hint = new Hint("");
+                    hint.Text = currGroups[currGroups.length - 1].directives[currGroups[currGroups.length - 1].directives.length - 1].hint.Text;
+
+                    // Create the Directive object
+                    const directive = new Directive(range, paramStr, hint);
+
+                    // Add the directive to the group
+                    currGroups[currGroups.length - 1].directives.push(directive);
+                    currGroups[currGroups.length - 1].completed = true;
+
+                    // Add the group to the return array
+                    ret.push(currGroups.pop()!);
+
+                    // Update nesting level
+                    currLevel -= 1;
                 }
                 else {
-                    // TODO: Indicate bad syntax
+                    // TODO: Indicate bad syntax with squiggly underline
                 }
             }
         }
@@ -310,16 +316,21 @@ export class Parser {
         if (!fileGroups) {
             return;
         }
-        const group = fileGroups.find(g => g.directives.some(d => d.contains(position)));
+        const group = fileGroups.find(
+            g => g.directives.some(
+                r => r.range.start.line <= position.line && r.range.end.line >= position.line
+            )
+        );
         
         // Get the range to outline
         let keywordRanges: vscode.Range[] = [];
         if (group) {
-            keywordRanges = group.directives;
+            keywordRanges = group.directives.map(d => d.range);
+
+            // Set the decorations to the ranges detected as matching keywords
+            editor.setDecorations(this.outlineDecoType, keywordRanges);
         }
 
-        // Set the decorations to the ranges detected as matching keywords
-        editor.setDecorations(this.outlineDecoType, keywordRanges);
     }
 
     /**
@@ -332,28 +343,63 @@ export class Parser {
     }
 
     /**
-     * @brief Update the hint under the cursor (add, delete or modify)
+     * @brief Update the hint under the cursor in the dataMap (add, delete or modify). Should call displayHints() after.
      * @param editor  The text editor to update
      */
     updateHints(editor: vscode.TextEditor) {
-        let hints = parseHints(editor);
-        this.removeHints(editor);
-        this.displayHints(editor, hints);
+        // Parse line under cursor
+        const position = editor.selection.active;
+
+        // Get the corresponding group in the dataMap
+        const fileGroups = this.dataMap.get(editor);
+        if (!fileGroups) {
+            return;
+        }
+
+        // Get the group containing the directive
+        const group = this.getGroupFromPosition(editor, position);
+        if (!group) {
+            return;
+        }
+
+
+        // TODO: Réutiliser le code de  parseFile() pour trouver le bon hint (extraire la fonction de recherche de hint)
+
+        // Get the hint under the cursor
+        const conditionText = getConditionText(editor.document.lineAt(position.line));
+        
+        // Update the hints of all the directives in the group
+        group.directives.forEach(d => {
+            // Update the hint text
+            d.hint.Text = conditionText;
+        });
     }
 
     /**
-     * @brief Display the hints in the given text editor
-     * 
-     * @param editor  The text editor to display the hints in
+     * @brief Display the hints in the editor
+     * @param editor The text editor to display the hints in
      */
-    displayHints(editor: vscode.TextEditor, hints: Hint[]) {
-        // Ensure we always work with an array
-        const hintList = Array.isArray(hints) ? hints : [hints];
+    displayHints(editor: vscode.TextEditor | vscode.TextEditor[]) {
+        // Check Config
+        const cfg = vscode.workspace.getConfiguration(extensionId);
+        if (!cfg.get('enable') || !cfg.get('hints.enable')) {
+            return;
+        }
 
-        // Display the hints in the given editor
-        hintList.forEach(h => {
-            editor.setDecorations(h.DecoType, [h.Range]);
-            this.hintsMap.get(editor)?.push(h);
+        // Ensure we always work with an array
+        const editors = Array.isArray(editor) ? editor : [editor];
+
+        // Display the hints in the given editors
+        editors.forEach(e => {
+            const groups = this.dataMap.get(e);
+            if (!groups) {
+                return;
+            }
+            groups.forEach(g => {
+                g.directives.forEach(d => {
+                    e.setDecorations(d.hint.DecoType, [d.range]);
+                });
+            });
         });
     }
 
@@ -361,16 +407,26 @@ export class Parser {
      * @brief Remove all the hint decorations from the given editor
      */
     removeHints(editor: vscode.TextEditor | vscode.TextEditor[]) {
+        // Check Config
+        const cfg = vscode.workspace.getConfiguration(extensionId);
+        if (!cfg.get('enable') || !cfg.get('hints.enable')) {
+            return;
+        }
+
         // Ensure we always work with an array
         const editors = Array.isArray(editor) ? editor : [editor];
 
         // Remove the hints from the given editors
         editors.forEach(e => {
-            this.hintsMap.get(e)?.forEach(h => {
-                // e.setDecorations(h.DecoType, []);
-                h.DecoType.dispose();
+            const groups = this.dataMap.get(e);
+            if (!groups) {
+                return;
+            }
+            groups.forEach(g => {
+                g.directives.forEach(d => {
+                    e.setDecorations(d.hint.DecoType, []);
+                });
             });
-            this.hintsMap.set(e, []);
         });
     }
 
@@ -428,288 +484,55 @@ export class Parser {
             this.parseEditor(e);  // Parse the whole file
         });
     }
+
+    /**
+     * @brief Get the group containing the directive at the given position
+     * @param editor The text editor to search in
+     * @param position The position to search from
+     * @returns A {@link DirectiveGroup}, or undefined if not found
+     */
+    getGroupFromPosition(editor: vscode.TextEditor, position: vscode.Position): DirectiveGroup | undefined {
+        const groups = this.dataMap.get(editor);
+        if (!groups) {
+            return undefined;
+        }
+        return groups.find(
+            g => g.directives.some(
+                r => r.range.start.line <= position.line && r.range.end.line >= position.line
+            )
+        );
+    }
 }
 
 /**
- * @brief Parse the document and search for the hints to display
- * 
- * @param editor  The text editor to display the hints in
- * @returns  Array of Hint tuples
- */
-function parseHints(editor: vscode.TextEditor): Hint[] {
-    // Create the return value
-    let ret: Hint[] = [];
-
-    // If the extension or the feature are disabled, do nothing
-    const cfg = vscode.workspace.getConfiguration(extensionId);
-    if (!cfg.get('enable') || !cfg.get('hints.enable')) {
-        return ret;
-    }
-
-    // Language should be C or C++
-    const languageId = editor.document.languageId;
-    if ( !(languageId === 'c' || languageId === 'cpp' || languageId === 'h' || languageId === 'hpp') ) {
-        return ret;
-    }
-
-    const document = editor.document;
-
-    console.log('[displayHints] File:', vscode.workspace.asRelativePath(document.fileName));
-
-    // Parse the document and search for the closing preprocessor directives
-    for (let line = 0; line < document.lineCount; line++) {
-        const text = document.lineAt(line).text.trim();
-        if (text.startsWithClosingKeyword()) {
-            // Save closing range
-            var closingRange = getKeywordRange(document.lineAt(line), text);
-            if(!closingRange) {
-                continue; // If the range is undefined, continue (should not happen)
-            }
-
-            // Find the opening keyword
-            var openingRange = findOpeningKeyword(document, new vscode.Position(line, 0)).pop();
-            if (openingRange) {
-                // Get the text after the openingRange
-                const condition = document.getText(new vscode.Range(openingRange.end, document.lineAt(line).range.end));
-                // Create the hint
-                const hint = new Hint(closingRange, condition);
-                ret.push(hint);
-            }
-        }
-    }
-
-    return ret;
-}
-
-/**
- * @brief Find the matching keywords for the given position in the document.
- * 
- * Parse the document and search for the corresponding keyword for the given position.
- * Save depth of the current keyword and search for the next keyword with the same depth.
- * 
- * @param document The document to search
- * @param position The position to search from
- * @param direction The direction to search in (0 for up, 1 for down)
- * @returns An array of ranges containing the matching keywords
- */
-function findMatchingKeywords(document: vscode.TextDocument, position: vscode.Position): vscode.Range[] {
-    const line = document.lineAt(position.line);
-    const text = line.text.trim();
-    const start = line.range.start;
-    const end = line.range.end;
-    
-    let ret: vscode.Range[] = [];
-
-    // If the cursor is on an opening keyword, find the closing keyword
-    if (text.startsWithOpeningKeyword()) {
-        ret = findClosingKeyword(document, position);
-    }
-
-    // If the cursor is on a closing keyword, find the opening keyword
-    if (text.startsWithClosingKeyword()) {
-        ret = findOpeningKeyword(document, position);
-    }
-
-    // If the cursor is on a middle keyword, find both the opening and closing keywords
-    if (text.startsWithMiddleKeyword()) {
-        let temp1 = findOpeningKeyword(document, position); // Find the opening keyword
-        let temp2 = findClosingKeyword(document, position); // Find the closing keyword
-        ret = temp1.concat(temp2); // Concatenate the arrays
-    }
-
-    // If the cursor is on '#define' keyword, find the matching '#undef' keyword
-    if (text.startsWith('#define')) {
-        const words = text.split(' ');
-        if(words.length > 1) {
-            const definition = words[1]; // Get the definition
-            ret = searchDefinitionKeywords(document, position, Direction.Down, definition);
-        }
-        // else bad line, do nothing
-    }
-
-    // If the cursor is on '#undef' keyword, find the matching '#define' keyword
-    if (text.startsWith('#undef')) {
-        const words = text.split(' ');
-        if(words.length > 1) {
-            const definition = words[1]; // Get the definition
-            ret = searchDefinitionKeywords(document, position, Direction.Up, definition);
-        }
-        // else bad line, do nothing
-    }
-
-    // Sort the ranges by line number
-    ret.sort((a, b) => a.start.line - b.start.line);
-
-    return ret;
-}
-
-/**
- * @brief Find the opening and middle preprocessor directive for the given position in the document (if any)
- * 
- * @param document The document to search
- * @param position The position to search from
- * @returns An array of ranges containing the opening and middle keywords (if any)
- */
-function findOpeningKeyword(document: vscode.TextDocument, position: vscode.Position): vscode.Range[] {
-    return searchConditionalKeywords(document, position, Direction.Up);
-}
-
-/**
- * @brief Find the closing and middle preprocessor directive for the given position in the document (if any)
- * 
- * @param document The document to search
- * @param position The position to search from
- * @returns An array of ranges containing the closing and middle keywords (if any)
- */
-function findClosingKeyword(document: vscode.TextDocument, position: vscode.Position): vscode.Range[] {
-    return searchConditionalKeywords(document, position, Direction.Down);
-}
-
-/**
- * @brief Search for the matching conditionnal preprocessor directive for the given position in the document
- * 
- * Parse the document and search for the corresponding keyword for the given position.
- * Save depth of the current keyword and search for each keyword with the same depth.
- * Stops when a opening or closing keyword (depending on the direction) is found with the same depth.
- * Only conditional keywords are searched (#if, #ifdef, #ifndef, #elif, #else, #endif)
- * 
- * @param document  The document to search
- * @param position  The position to search from
- * @param direction  The direction to search in (0 for up, 1 for down)
- * @returns  An array of ranges containing the conditional keywords (if any)
- */
-function searchConditionalKeywords(document: vscode.TextDocument, position: vscode.Position, direction: Direction): vscode.Range[] {
-    const ret: vscode.Range[] = [];
-    let lineNb = position.line + direction; // Start from the next line
-    let depth = 0;
-    let found = false;
-
-    while ( (lineNb >= 0 && lineNb < document.lineCount) && (!found)) {
-        // Parse the line
-        const text = document.lineAt(lineNb).text.trim();
-
-        // Opening keyword detected
-        if ( text.startsWithOpeningKeyword() ) {
-            // If we are going up and the depth is 0, we found the last keyword
-            if ( (direction === Direction.Up) && (depth === 0) ) {
-                // Find the range of the keyword in line
-                dico.openingKeywords.forEach(keyword => {
-                    const range = getKeywordRange(document.lineAt(lineNb), keyword);
-                    if (range) {
-                        ret.push(range); // Add the range of the keyword
-                    }
-                });
-                found = true; // Stop the search
-            }
-            // Otherwise, increase the depth
-            else {
-                depth += 1;
-            }
-        }
-
-        // Middle keyword detected
-        else if (text.startsWithMiddleKeyword()) {
-            // If its on the same depth, we found a matching keyword
-            if (depth === 0) {
-                // Find the range of the keyword in line
-                dico.middleKeywords.forEach(keyword => {
-                    const range = getKeywordRange(document.lineAt(lineNb), keyword);
-                    if (range) {
-                        ret.push(range); // Add the range of the keyword
-                    }
-                });
-            }
-        }
-
-        // Closing keyword detected
-        else if ( text.startsWithClosingKeyword() ) {
-            // If we are going down and the depth is 0, we found the last keyword
-            if ( (direction === Direction.Down) && (depth === 0) ) {
-                // Find the range of the keyword in line
-                dico.closingKeywords.forEach(keyword => {
-                    const range = getKeywordRange(document.lineAt(lineNb), keyword);
-                    if (range) {
-                        ret.push(range); // Add the range of the keyword
-                    }
-                });
-                found = true; // Stop the search
-            }
-            // Otherwise, decrease the depth
-            else {
-                depth -= 1;
-            }
-        }
-
-        // Move to the next line
-        lineNb += direction;
-    }
-
-    return ret;
-}
-
-/**
- * @brief Search for the matching definition preprocessor directive for the given position in the document
- * 
- * Parse the document and search for the corresponding keyword for the given position.
- * Only definition keywords are searched (#define or #undef)
- * 
- * @param document  The document to search
- * @param position  The position to search from
- * @param direction  The direction to search in (0 for up, 1 for down)
- * @param definition  The definition to search for
- * @returns  An array of ranges containing the definition keywords (if any)
- */
-function searchDefinitionKeywords(document: vscode.TextDocument, position: vscode.Position, direction: Direction, definition: string): vscode.Range[] {
-    const ret: vscode.Range[] = [];
-    let line = position.line + direction; // Start from the next line
-    let found = false;
-
-    while ( ((line >= 0) && (line < document.lineCount)) && (!found)) {
-        // Parse the line
-        const text = document.lineAt(line).text.trim();
-        const searchedKeyword = (direction === Direction.Up) ? '#define' : '#undef';
-
-        // Look for the searched keyword
-        // Split the line into words
-        // #define xxxx : parsed = ['#define', 'xxxx']
-        // #undef xxxx :  parsed = ['#undef', 'xxxx']
-        const parsed = text.split(' '); 
-        
-        if(parsed.length <= 1){ // If there is only one word, continue
-            line += direction; // Move to the next line
-            continue;
-        }
-
-        // Check if the keyword is the one we are looking for and if the definition is the one we are looking for
-        if ( (parsed[0]===searchedKeyword) && (parsed[1] === definition) ) {
-            // Find the range of the keyword in line
-            const range = getKeywordRange(document.lineAt(line), searchedKeyword);
-            if (range) {
-                ret.push(range); // Add the range of the keyword
-                found = true; // Stop the search
-            }
-        }
-
-        // Move to the next line
-        line += direction;
-    }
-
-    return ret;
-}
-
-/**
- * @brief Parse the given line and search for the given keyword
+ * @brief Parse the given line and search for the given keyword(s)
  * 
  * @param line The line to parse
- * @param keyword The keyword to search for
+ * @param keyword The keyword(s) to search for
  * @returns The range of the keyword if found, undefined otherwise
  */
-function getKeywordRange(line: vscode.TextLine, keyword: string): vscode.Range | undefined {
-    const index = line.text.indexOf(keyword);
-    if (index !== -1) {
-        return new vscode.Range(line.lineNumber, index, line.lineNumber, index + keyword.length);
+function getKeywordRange(line: vscode.TextLine, keyword: string | string[]): vscode.Range | undefined {
+    const keywords = Array.isArray(keyword) ? keyword : [keyword];
+    for (const key of keywords) {
+        const index = line.text.indexOf(key);
+        if (index !== -1) {
+            return new vscode.Range(line.lineNumber, index, line.lineNumber, index + key.length);
+        }
     }
     return undefined;
+}
+
+/**
+ * @brief Parse the text after the directive keyword
+ * @param line The line to parse
+ * @returns The condition string
+ */
+function getConditionText(line: vscode.TextLine): string {
+    const words = line.text.split(' ');
+    if (words.length > 1) {
+        return words.slice(1).join(' ');
+    }
+    return '';
 }
 
 //###################//
@@ -724,11 +547,6 @@ declare global {
         startsWithMiddleKeyword(): boolean;
     }
 }
-
-
-//##################//
-// String extension //
-//##################//
 
 /**
  * @brief Check if the string starts with an opening preprocessor directive
