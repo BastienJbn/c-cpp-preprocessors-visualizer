@@ -7,12 +7,17 @@ export class Hint {
     /**
      * @brief Decoration type of the hint
      */
-    public DecoType: vscode.TextEditorDecorationType;
+    public decoType: vscode.TextEditorDecorationType;
+
+    /**
+     * @brief Range of the hint in the editor
+     */
+    public range: vscode.Range;
 
     /**
      * @brief Text of the hint
      */
-    public Text: string;
+    public text: string;
 
     /**
      * @brief Boolean indicating if the hint is negated
@@ -38,12 +43,12 @@ export class Hint {
      * @param DecoType The decoration type for the hint.
      * @param Range The range of the hint in the editor.
      */
-    constructor(Text: string) {
-        this.Text = Text;
-
-        this.DecoType = vscode.window.createTextEditorDecorationType({
+    constructor(Text: string, Range: vscode.Range) {
+        this.text = Text;
+        this.range = Range;
+        this.decoType = vscode.window.createTextEditorDecorationType({
             after: {
-                contentText: this.Text,
+                contentText: ' ' + this.text,
                 color: 'grey',
                 fontStyle: 'italic',
             },
@@ -58,12 +63,22 @@ export class Hint {
      * If the hint already contains a '!' character, it is removed.
      */
     public NegateString(): void {
-        if (this.Text[0] === '!') {
-            this.Text = this.Text.slice(1);
+        // Negate the hint text
+        if (this.text[0] === '!') {
+            this.text = this.text.slice(1);
             this.negated = false;
         } else {
-            this.Text = '!' + this.Text;
+            this.text = '!' + this.text;
             this.negated = true;
         }
+
+        // Update the decoration type
+        this.decoType = vscode.window.createTextEditorDecorationType({
+            after: {
+                contentText: ' ' + this.text,
+                color: 'grey',
+                fontStyle: 'italic',
+            },
+        });
     }
 }

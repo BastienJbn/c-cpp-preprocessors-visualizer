@@ -36,10 +36,19 @@ export class Parser {
         this.visibleEditors = [...vscode.window.visibleTextEditors];
     
         // Trigger the parser on extension activation
-        if (this.currEditor) {
-            this.parseVisibleEditors();
-            this.outlineUnderCursor(this.currEditor);
-            this.displayHints(this.currEditor);
+        this.parseEditor(this.visibleEditors);
+        this.outlineUnderCursor(this.currEditor);
+
+        // Display the hints in current editor only if activeEditorOnly is set to true
+        const cfg = vscode.workspace.getConfiguration(extensionId);
+        if (cfg.get('hints.activeEditorOnly')) {
+            if(this.currEditor) {
+                this.displayHints(this.currEditor);
+            }
+        }
+        // Otherwise, display hints in all visible editors
+        else {
+            this.displayHints(this.visibleEditors);
         }
     
         // On every change of the active text editor
@@ -71,8 +80,8 @@ export class Parser {
         // On every change in the configuration (settings)
         vscode.workspace.onDidChangeConfiguration(event => {
             if (event.affectsConfiguration(extensionId)) {
-                this.removeHints(this.visibleEditors); // Remove all hints
-                this.parseVisibleEditors();
+                this.removeHints(this.visibleEditors);  // Remove all hints
+                this.parseEditor(this.visibleEditors);  // Parse all visible editors
                 this.displayHints(this.visibleEditors); // Display all hints
             }
         }, null, context.subscriptions);
@@ -83,7 +92,7 @@ export class Parser {
      */
     public deactivate() {
         this.removeHints(this.visibleEditors);  // Remove all hints
-        this.removeOutlines();             // Remove all outlines
+        this.removeOutlines();                  // Remove all outlines
     }
 
     //#################//
@@ -137,32 +146,30 @@ export class Parser {
     /*** Methods ***/
 
     /**
-     * @brief Parse the visible editors
-     */
-    parseVisibleEditors() {
-        // If 'activeEditorOnly' is set to true, only parse the current editor
-        const cfg = vscode.workspace.getConfiguration(extensionId);
-        if (cfg.get('hints.activeEditorOnly')) {
-            if (this.currEditor) {
-                this.parseEditor(this.currEditor);
-            }
-        }
-        // Otherwise, parse all visible editors
-        else {
-            this.visibleEditors.forEach(e => {
-                this.parseEditor(e);
-            });
-        }
-    }
-    
-    /**
      * @brief Parse the whole file
      * @param editor The text editor to parse
      */
-    parseEditor(editor: vscode.TextEditor) {
-        const doc = editor.document;
-        const groups = this.parseFile(doc);
-        this.dataMap.set(editor, groups);
+    parseEditor(editor: vscode.TextEditor | vscode.TextEditor[] | undefined) {
+        // Check Config
+        const cfg = vscode.workspace.getConfiguration(extensionId);
+        if (!cfg.get('enable')) {
+            return;
+        }
+
+        // Ensure editor is defined
+        if (!editor) {
+            return;
+        }
+
+        // Ensure we always work with an array
+        const editors = Array.isArray(editor) ? editor : [editor];
+
+        // Parse the given editor(s)
+        editors.forEach(e => {
+            const doc = e.document;
+            const groups = this.parseFile(doc);
+            this.dataMap.set(e, groups);
+        });
     }
 
     /**
@@ -191,19 +198,20 @@ export class Parser {
                 const newGroup = new DirectiveGroup([], currLevel);
 
                 // Find the range of the keyword in line
-                let range = getKeywordRange(document.lineAt(line), dico.openingKeywords)!;
+                const directiveRg = getKeywordRange(document.lineAt(line), dico.openingKeywords)!;
 
                 // Find the param string
-                let paramStr = getConditionText(document.lineAt(line));
+                const paramStr = getConditionText(document.lineAt(line));
 
                 // Find the hint
-                let hint = new Hint(paramStr);
+                const hintRg = new vscode.Range(line, directiveRg.end.character, line, document.lineAt(line).range.end.character);
+                let hint = new Hint(paramStr, hintRg);
                 if (text.startsWith('#ifndef') || text.startsWith('#if !defined') || text.startsWith('#ifneq')) {
                     hint.NegateString();
                 }
                 
                 // Create the Directive object
-                const directive = new Directive(range, paramStr, hint);
+                const directive = new Directive(directiveRg, paramStr, hint);
                 newGroup.directives.push(directive);
 
                 // Add the new group to the current groups
@@ -219,27 +227,27 @@ export class Parser {
                     const group = currGroups[currGroups.length - 1];
 
                     // Find the directive range
-                    let range = getKeywordRange(document.lineAt(line), dico.middleKeywords)!;
+                    const directiveRg = getKeywordRange(document.lineAt(line), dico.middleKeywords)!;
 
                     // Find the param string
-                    let paramStr = getConditionText(document.lineAt(line));
+                    const paramStr = getConditionText(document.lineAt(line));
 
-                    // Find the hint
-                    let hint = new Hint("");
+                    // Find the hint and its range
+                    const hintRg = new vscode.Range(line, directiveRg.end.character, line, document.lineAt(line).range.end.character);
+                    let hint = new Hint("", hintRg);
                     if (text.startsWith('#else')) {
                         // Hint str is the negation of the last directive hint
-                        hint.Text = group.directives[group.directives.length - 1].hint.Text;
+                        hint.text = group.directives[group.directives.length - 1].hint.text;
                         hint.NegateString();
                     }
                     else if (text.startsWith('#elif')) {
-                        // Hint str is the new condition
-                        let hintText = getConditionText(document.lineAt(line));
-                        hint.Text = hintText;
+                        // Hint text is the new condition
+                        hint.text = getConditionText(document.lineAt(line));;
                         hint.modified = true;
                     }
 
                     // Create the Directive object
-                    const directive = new Directive(range, paramStr, hint);
+                    const directive = new Directive(directiveRg, paramStr, hint);
 
                     // Add the directive to the group
                     group.directives.push(directive);
@@ -253,17 +261,18 @@ export class Parser {
             else if (text.startsWithClosingKeyword()) {
                 if (currGroups) {
                     // Find the directive range
-                    let range = getKeywordRange(document.lineAt(line), dico.closingKeywords)!;
+                    const directiveRg = getKeywordRange(document.lineAt(line), dico.closingKeywords)!;
 
                     // Find the param string
-                    let paramStr = getConditionText(document.lineAt(line));
+                    const paramStr = getConditionText(document.lineAt(line));
 
                     // Find the hint. Text is equal to the last directive hint
-                    let hint = new Hint("");
-                    hint.Text = currGroups[currGroups.length - 1].directives[currGroups[currGroups.length - 1].directives.length - 1].hint.Text;
+                    const hintRg = new vscode.Range(line, directiveRg.end.character, line, document.lineAt(line).range.end.character);
+                    let hint = new Hint("", hintRg);
+                    hint.text = currGroups[currGroups.length - 1].directives[0].hint.text;
 
                     // Create the Directive object
-                    const directive = new Directive(range, paramStr, hint);
+                    const directive = new Directive(directiveRg, paramStr, hint);
 
                     // Add the directive to the group
                     currGroups[currGroups.length - 1].directives.push(directive);
@@ -280,7 +289,6 @@ export class Parser {
                 }
             }
         }
-
         return ret;
     }
 
@@ -288,10 +296,15 @@ export class Parser {
      * @brief Highlight the matching preprocessor directives under the cursor (if any)
      * @param editor The text editor to highlight the pair in
      */
-    outlineUnderCursor(editor: vscode.TextEditor) {
+    outlineUnderCursor(editor: vscode.TextEditor | undefined) {
         // If the extension or the feature are disabled, do nothing
         const cfg = vscode.workspace.getConfiguration(extensionId);
         if (!cfg.get('enable') || !cfg.get('outlines.enable')) {
+            return;
+        }
+
+        // Ensure editor is defined
+        if (!editor) {
             return;
         }
 
@@ -326,11 +339,9 @@ export class Parser {
         let keywordRanges: vscode.Range[] = [];
         if (group) {
             keywordRanges = group.directives.map(d => d.range);
-
-            // Set the decorations to the ranges detected as matching keywords
-            editor.setDecorations(this.outlineDecoType, keywordRanges);
         }
-
+        // Set the decorations to detected ranges, or remove them if none 
+        editor.setDecorations(this.outlineDecoType, keywordRanges);
     }
 
     /**
@@ -362,7 +373,6 @@ export class Parser {
             return;
         }
 
-
         // TODO: Réutiliser le code de  parseFile() pour trouver le bon hint (extraire la fonction de recherche de hint)
 
         // Get the hint under the cursor
@@ -371,7 +381,7 @@ export class Parser {
         // Update the hints of all the directives in the group
         group.directives.forEach(d => {
             // Update the hint text
-            d.hint.Text = conditionText;
+            d.hint.text = conditionText;
         });
     }
 
@@ -379,10 +389,15 @@ export class Parser {
      * @brief Display the hints in the editor
      * @param editor The text editor to display the hints in
      */
-    displayHints(editor: vscode.TextEditor | vscode.TextEditor[]) {
+    displayHints(editor: vscode.TextEditor | vscode.TextEditor[] | undefined) {
         // Check Config
         const cfg = vscode.workspace.getConfiguration(extensionId);
         if (!cfg.get('enable') || !cfg.get('hints.enable')) {
+            return;
+        }
+
+        // Ensure editor is defined
+        if (!editor) {
             return;
         }
 
@@ -391,28 +406,32 @@ export class Parser {
 
         // Display the hints in the given editors
         editors.forEach(e => {
+            // If activeEditorOnly, display in the current editor only
+            if (cfg.get('hints.activeEditorOnly') && e !== this.currEditor) {
+                return;
+            }
+
             const groups = this.dataMap.get(e);
             if (!groups) {
                 return;
             }
+
             groups.forEach(g => {
                 g.directives.forEach(d => {
-                    e.setDecorations(d.hint.DecoType, [d.range]);
+                    // Do not display hints for the opening directive
+                    if(d === g.directives[0]) {
+                        return;
+                    }
+                    e.setDecorations(d.hint.decoType, [d.hint.range]);
                 });
             });
         });
     }
 
     /**
-     * @brief Remove all the hint decorations from the given editor
+     * @brief Remove all the hint decorations from the given editor(s)
      */
     removeHints(editor: vscode.TextEditor | vscode.TextEditor[]) {
-        // Check Config
-        const cfg = vscode.workspace.getConfiguration(extensionId);
-        if (!cfg.get('enable') || !cfg.get('hints.enable')) {
-            return;
-        }
-
         // Ensure we always work with an array
         const editors = Array.isArray(editor) ? editor : [editor];
 
@@ -422,9 +441,10 @@ export class Parser {
             if (!groups) {
                 return;
             }
+
             groups.forEach(g => {
                 g.directives.forEach(d => {
-                    e.setDecorations(d.hint.DecoType, []);
+                    e.setDecorations(d.hint.decoType, []);
                 });
             });
         });
@@ -440,25 +460,24 @@ export class Parser {
         }
         else {
             console.log('Editor changed to', vscode.workspace.asRelativePath(newEditor.document.fileName));
-
-            this.outlineUnderCursor(newEditor);
         }
-
+        
         this.removeOutlines();
 
-        // Remove the hints if the setting is set to activeEditorOnly and parse the new file
+        // Remove the hints if the setting is set to activeEditorOnly and display in the new file
         const cfg = vscode.workspace.getConfiguration(extensionId);
         if (cfg.get('hints.activeEditorOnly')) {
             if(this.currEditor) {
                 this.removeHints(this.currEditor);
             }
-            if(newEditor) {
-                this.parseEditor(newEditor);
-            }
         }
 
         // Set the new editor as the current editor
         this.currEditor = newEditor;
+
+        // Update new editor
+        this.outlineUnderCursor(this.currEditor);
+        this.displayHints(this.currEditor);
     }
 
     /**
@@ -482,6 +501,7 @@ export class Parser {
         addedEditors.forEach(e => {
             this.visibleEditors.push(e);  // Add the new editors to the list
             this.parseEditor(e);  // Parse the whole file
+            this.displayHints(e);  // Display the hints
         });
     }
 
