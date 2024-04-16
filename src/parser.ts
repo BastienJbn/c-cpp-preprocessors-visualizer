@@ -131,6 +131,12 @@ export class Parser {
         overviewRulerColor: '#929292',  //Color
     });
 
+    private readonly scrollbarDecoType: vscode.TextEditorDecorationType =
+    vscode.window.createTextEditorDecorationType({
+        isWholeLine: true,
+        overviewRulerColor: 'grey',
+    });
+
     /**
      * @var dataMap
      * @brief A map where each key is a vscode.TextEditor and each value is a DirectiveGroup Array.
@@ -198,7 +204,11 @@ export class Parser {
                 const newGroup = new DirectiveGroup([], currLevel);
 
                 // Find the range of the keyword in line
-                const directiveRg = getKeywordRange(document.lineAt(line), dico.openingKeywords)!;
+                const directiveRg = getKeywordRange(document.lineAt(line), dico.openingKeywords);
+                if(!directiveRg) {
+                    console.log('Error: Opening keyword not found in line', line);
+                    return [];
+                }
 
                 // Find the param string
                 const paramStr = getConditionText(document.lineAt(line));
@@ -227,7 +237,11 @@ export class Parser {
                     const group = currGroups[currGroups.length - 1];
 
                     // Find the directive range
-                    const directiveRg = getKeywordRange(document.lineAt(line), dico.middleKeywords)!;
+                    const directiveRg = getKeywordRange(document.lineAt(line), dico.middleKeywords);
+                    if(!directiveRg) {
+                        console.log('Error: Middle keyword not found in line', line);
+                        return [];
+                    }
 
                     // Find the param string
                     const paramStr = getConditionText(document.lineAt(line));
@@ -237,7 +251,7 @@ export class Parser {
                     let hint = new Hint("", hintRg);
                     if (text.startsWith('#else')) {
                         // Hint str is the negation of the last directive hint
-                        hint.text = group.directives[group.directives.length - 1].hint.text;
+                        hint.text = currGroups[currGroups.length - 1].directives[0].hint.text;
                         hint.NegateString();
                     }
                     else if (text.startsWith('#elif')) {
@@ -261,15 +275,19 @@ export class Parser {
             else if (text.startsWithClosingKeyword()) {
                 if (currGroups) {
                     // Find the directive range
-                    const directiveRg = getKeywordRange(document.lineAt(line), dico.closingKeywords)!;
+                    const directiveRg = getKeywordRange(document.lineAt(line), dico.closingKeywords);
+                    if(!directiveRg) {
+                        console.log('Error: Closing keyword not found in line', line);
+                        return [];
+                    }
 
                     // Find the param string
                     const paramStr = getConditionText(document.lineAt(line));
 
                     // Find the hint. Text is equal to the last directive hint
                     const hintRg = new vscode.Range(line, directiveRg.end.character, line, document.lineAt(line).range.end.character);
-                    let hint = new Hint("", hintRg);
-                    hint.text = currGroups[currGroups.length - 1].directives[0].hint.text;
+                    const hintStr = currGroups[currGroups.length - 1].directives[0].hint.text;
+                    const hint = new Hint(hintStr, hintRg);
 
                     // Create the Directive object
                     const directive = new Directive(directiveRg, paramStr, hint);
@@ -342,6 +360,7 @@ export class Parser {
         }
         // Set the decorations to detected ranges, or remove them if none 
         editor.setDecorations(this.outlineDecoType, keywordRanges);
+        editor.setDecorations(this.scrollbarDecoType, keywordRanges);
     }
 
     /**
@@ -350,6 +369,7 @@ export class Parser {
     removeOutlines() {
         if (this.currEditor) {
             this.currEditor.setDecorations(this.outlineDecoType, []);
+            this.currEditor.setDecorations(this.scrollbarDecoType, []);
         }
     }
 
@@ -525,21 +545,35 @@ export class Parser {
 }
 
 /**
- * @brief Parse the given line and search for the given keyword(s)
+ * @brief Parse the given line and search for the given keyword(s) (matching the whole word)
  * 
  * @param line The line to parse
  * @param keyword The keyword(s) to search for
  * @returns The range of the keyword if found, undefined otherwise
  */
 function getKeywordRange(line: vscode.TextLine, keyword: string | string[]): vscode.Range | undefined {
+    let ret: vscode.Range | undefined = undefined;
+
+    // Ensure keyword is an array
     const keywords = Array.isArray(keyword) ? keyword : [keyword];
-    for (const key of keywords) {
-        const index = line.text.indexOf(key);
-        if (index !== -1) {
-            return new vscode.Range(line.lineNumber, index, line.lineNumber, index + key.length);
+    
+    // Parse the directive
+    const directive = line.text.trim().split(' ')[0];
+
+    let i = 0;
+    let kw = keywords[i];
+    while (!ret && i < keywords.length) {
+        if (directive === kw) {
+            ret = new vscode.Range(
+                line.lineNumber, line.firstNonWhitespaceCharacterIndex,
+                line.lineNumber, line.firstNonWhitespaceCharacterIndex + kw.length
+            );
         }
+        i++;
+        kw = keywords[i];
     }
-    return undefined;
+
+    return ret;
 }
 
 /**
