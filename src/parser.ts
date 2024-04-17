@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 import * as dico from './dico';
-import { extensionId, log } from './misc';
+import { extensionId, log } from './utils';
 import { Hint } from './Hint';
 import { DirectiveGroup } from './DirectiveGroup';
 import { Directive } from './Directive';
@@ -584,7 +584,7 @@ function getKeywordRange(line: vscode.TextLine, keyword: string | string[]): vsc
  * @returns The condition string
  */
 function getConditionText(line: vscode.TextLine): string {
-    const words = line.text.split(' ');
+    const words = line.text.trim().split(' ');
     if (words.length > 1) {
         return words.slice(1).join(' ');
     }

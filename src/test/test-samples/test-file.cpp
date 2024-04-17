@@ -34,9 +34,9 @@ int main() {
     #ifdef A
     int a = 1;
         #ifdef B
-        int b = 2;
+            int b = 2;
         #else
-        int b = 3;
+            int b = 3;
         #endif
     #endif
 

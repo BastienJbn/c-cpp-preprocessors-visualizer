@@ -33,11 +33,11 @@ int main() {
 
 // Indentation test
     #ifdef A
-    int a = 1;
+        int a = 1;
         #ifdef B
-        int b = 2;
+            int b = 2;
         #else
-        int b = 3;
+            int b = 3;
         #endif
     #endif
 
@@ -48,7 +48,7 @@ int main() {
 #undef A
 
 #undef //Bad line test
-#undef NOT //No pair test, should not be outlined
+#undef NOT //No pair test
 
 
 
