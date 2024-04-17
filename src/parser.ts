@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 import * as dico from './dico';
-import { extensionId } from './misc';
+import { extensionId, log } from './misc';
 import { Hint } from './Hint';
 import { DirectiveGroup } from './DirectiveGroup';
 import { Directive } from './Directive';
@@ -186,7 +186,7 @@ export class Parser {
     parseFile(document: vscode.TextDocument): DirectiveGroup[] {
         let ret: DirectiveGroup[] = [];
 
-        console.log('[parseFile] File:', vscode.workspace.asRelativePath(document.fileName));
+        log('Parsing file:', vscode.workspace.asRelativePath(document.fileName));
 
         // Current nesting level
         let currLevel = 0;  
@@ -206,7 +206,7 @@ export class Parser {
                 // Find the range of the keyword in line
                 const directiveRg = getKeywordRange(document.lineAt(line), dico.openingKeywords);
                 if(!directiveRg) {
-                    console.log('Error: Opening keyword not found in line', line);
+                    log('Error: Opening keyword not found in line', line);
                     return [];
                 }
 
@@ -239,7 +239,7 @@ export class Parser {
                     // Find the directive range
                     const directiveRg = getKeywordRange(document.lineAt(line), dico.middleKeywords);
                     if(!directiveRg) {
-                        console.log('Error: Middle keyword not found in line', line);
+                        log('Error: Middle keyword not found in line', line);
                         return [];
                     }
 
@@ -251,7 +251,9 @@ export class Parser {
                     let hint = new Hint("", hintRg);
                     if (text.startsWith('#else')) {
                         // Hint str is the negation of the last directive hint
-                        hint.text = currGroups[currGroups.length - 1].directives[0].hint.text;
+                        const currGroup = currGroups[currGroups.length - 1];
+                        const lastDirective = currGroup.directives[currGroup.directives.length - 1];
+                        hint.text = lastDirective.hint.text;
                         hint.NegateString();
                     }
                     else if (text.startsWith('#elif')) {
@@ -277,7 +279,7 @@ export class Parser {
                     // Find the directive range
                     const directiveRg = getKeywordRange(document.lineAt(line), dico.closingKeywords);
                     if(!directiveRg) {
-                        console.log('Error: Closing keyword not found in line', line);
+                        log('Error: Closing keyword not found in line', line);
                         return [];
                     }
 
@@ -476,10 +478,10 @@ export class Parser {
      */
     activeEditorChanged(newEditor: vscode.TextEditor | undefined) {
         if(!newEditor) {
-            console.log('Editor changed to undefined');
+            log('Editor changed to undefined');
         }
         else {
-            console.log('Editor changed to', vscode.workspace.asRelativePath(newEditor.document.fileName));
+            log('Editor changed to', vscode.workspace.asRelativePath(newEditor.document.fileName));
         }
         
         this.removeOutlines();
@@ -505,7 +507,7 @@ export class Parser {
      * @param newEditors The new list of visible text editors
      */
     visibleEditorsChanged(newEditors: readonly vscode.TextEditor[]) {
-        console.log('Visible editors changed');
+        log('Visible editors changed');
 
         // Compare differences between the old and new visible editors
         const oldEditors = this.visibleEditors;
