@@ -366,9 +366,7 @@ export class Parser {
         const groups = this.parseFile(editor.document);
         this.dataMap.set(editor, groups);
 
-        // TODO
-        // Doing re-parse for now. Not suitable for large files.
-        // Should only update the changed part of the file.
+        // FIXME: This is not efficient. Should only update the changed part of the file.
     }
 
     /**
