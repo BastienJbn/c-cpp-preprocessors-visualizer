@@ -6,14 +6,6 @@ import { Hint } from './Hint';
 import { DirectiveGroup } from './DirectiveGroup';
 import { Directive, HintedDirective, OpeningDirective, MiddleDirective, ClosingDirective } from './Directive';
 
-/**
- * @brief Enum to represent the direction of the search
- */
-const enum Direction {
-    Up = -1,
-    Down = 1
-}
-
 export class Parser {
     //##############//
     // Public Scope //
