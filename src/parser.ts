@@ -4,7 +4,7 @@ import * as dico from './dico';
 import { extensionId, log } from './utils';
 import { Hint } from './Hint';
 import { DirectiveGroup } from './DirectiveGroup';
-import { Directive } from './Directive';
+import { Directive, HintedDirective, OpeningDirective, MiddleDirective, ClosingDirective } from './Directive';
 
 /**
  * @brief Enum to represent the direction of the search
@@ -64,8 +64,9 @@ export class Parser {
         // On every change in the text document
         vscode.workspace.onDidChangeTextDocument(event => {
             if (this.currEditor && (event.document === this.currEditor.document)) {
+                this.removeHints(this.currEditor);
+                this.updateData(this.currEditor);
                 this.outlineUnderCursor(this.currEditor);
-                this.updateHints(this.currEditor);
                 this.displayHints(this.currEditor);
             }
         }, null, context.subscriptions);
@@ -191,125 +192,183 @@ export class Parser {
         // Current nesting level
         let currLevel = 0;  
 
-        // Fifo of current groups (index correspond to a relative nesting level)
-        let currGroups: DirectiveGroup[] = [];
+        // Lifo of current groups (index correspond to a relative nesting level)
+        let currGroups: DirectiveGroup[] = [new DirectiveGroup(undefined, 0)];
 
         // Parse line by line
         for (let line = 0; line < document.lineCount; line++) {
-            const text = document.lineAt(line).text.trim();
+            const text = document.lineAt(line).text;
             
-            // Opening keyword detected
-            if (text.startsWithOpeningKeyword()) {
+            // Parse the line 
+            const directive = this.parseLine(document.lineAt(line), currGroups[currLevel]);
+
+            // If there is no directive, continue to the next line
+            if(!directive) {
+                continue;
+            }
+
+            // Opening directive found
+            if (directive instanceof OpeningDirective) {
                 // Create a new group
-                const newGroup = new DirectiveGroup([], currLevel);
-
-                // Find the range of the keyword in line
-                const directiveRg = getKeywordRange(document.lineAt(line), dico.openingKeywords);
-                if(!directiveRg) {
-                    log('Error: Opening keyword not found in line', line);
-                    return [];
-                }
-
-                // Find the param string
-                const paramStr = getConditionText(document.lineAt(line));
-
-                // Find the hint
-                const hintRg = new vscode.Range(line, directiveRg.end.character, line, document.lineAt(line).range.end.character);
-                let hint = new Hint(paramStr, hintRg);
-                if (text.startsWith('#ifndef') || text.startsWith('#if !defined') || text.startsWith('#ifneq')) {
-                    hint.NegateString();
-                }
-                
-                // Create the Directive object
-                const directive = new Directive(directiveRg, paramStr, hint);
-                newGroup.directives.push(directive);
-
-                // Add the new group to the current groups
+                const newGroup = new DirectiveGroup([directive], currLevel + 1);
                 currGroups.push(newGroup);
-
-                // Update values
-                currLevel += 1;
+                currLevel++;
             }
-
-            // Middle keyword detected
-            else if (text.startsWithMiddleKeyword()) {
-                if (currGroups) {
-                    const group = currGroups[currGroups.length - 1];
-
-                    // Find the directive range
-                    const directiveRg = getKeywordRange(document.lineAt(line), dico.middleKeywords);
-                    if(!directiveRg) {
-                        log('Error: Middle keyword not found in line', line);
-                        return [];
-                    }
-
-                    // Find the param string
-                    const paramStr = getConditionText(document.lineAt(line));
-
-                    // Find the hint and its range
-                    const hintRg = new vscode.Range(line, directiveRg.end.character, line, document.lineAt(line).range.end.character);
-                    let hint = new Hint("", hintRg);
-                    if (text.startsWith('#else')) {
-                        // Hint str is the negation of the last directive hint
-                        const currGroup = currGroups[currGroups.length - 1];
-                        const lastDirective = currGroup.directives[currGroup.directives.length - 1];
-                        hint.text = lastDirective.hint.text;
-                        hint.NegateString();
-                    }
-                    else if (text.startsWith('#elif')) {
-                        // Hint text is the new condition
-                        hint.text = getConditionText(document.lineAt(line));;
-                        hint.modified = true;
-                    }
-
-                    // Create the Directive object
-                    const directive = new Directive(directiveRg, paramStr, hint);
-
-                    // Add the directive to the group
-                    group.directives.push(directive);
-                }
-                else {
-                    // TODO: Indicate bad syntax with squiggly underline
-                }
+            // Middle directive found
+            else if (directive instanceof MiddleDirective) {
+                // Add the directive to the current group
+                currGroups[currLevel].directives.push(directive);
             }
+            // Closing directive found
+            else if (directive instanceof ClosingDirective) {
+                // Add the directive to the current group
+                currGroups[currLevel].directives.push(directive);
 
-            // Closing keyword detected
-            else if (text.startsWithClosingKeyword()) {
-                if (currGroups) {
-                    // Find the directive range
-                    const directiveRg = getKeywordRange(document.lineAt(line), dico.closingKeywords);
-                    if(!directiveRg) {
-                        log('Error: Closing keyword not found in line', line);
-                        return [];
-                    }
+                // Add the group to the return array
+                ret.push(currGroups.pop()!);
 
-                    // Find the param string
-                    const paramStr = getConditionText(document.lineAt(line));
-
-                    // Find the hint. Text is equal to the last directive hint
-                    const hintRg = new vscode.Range(line, directiveRg.end.character, line, document.lineAt(line).range.end.character);
-                    const hintStr = currGroups[currGroups.length - 1].directives[0].hint.text;
-                    const hint = new Hint(hintStr, hintRg);
-
-                    // Create the Directive object
-                    const directive = new Directive(directiveRg, paramStr, hint);
-
-                    // Add the directive to the group
-                    currGroups[currGroups.length - 1].directives.push(directive);
-                    currGroups[currGroups.length - 1].completed = true;
-
-                    // Add the group to the return array
-                    ret.push(currGroups.pop()!);
-
-                    // Update nesting level
-                    currLevel -= 1;
-                }
-                else {
-                    // TODO: Indicate bad syntax with squiggly underline
-                }
+                // Update nesting level
+                currLevel -= 1;
             }
         }
         return ret;
+    }
+
+    /**
+     * @brief Parse the line and return the corresponding directive
+     * @param line  The line to parse
+     * @param group  The group to which the directive belongs
+     * @returns  The nesting level update (can be negative), or undefined if the directive is not valid
+     */
+    parseLine(line: vscode.TextLine, group: DirectiveGroup | undefined) : Directive | undefined {
+        let ret: Directive | undefined = undefined;
+        
+        const text = line.text.trim();
+            
+        // Opening keyword detected
+        if (text.startsWithOpeningKeyword()) {
+            // Find the range of the keyword in line
+            const directiveRg = getKeywordRange(line, dico.openingKeywords);
+            if(!directiveRg) {
+                log('Error: Opening keyword not found in line', line);
+                return undefined;
+            }
+
+            // Find the param string
+            const paramStr = getConditionText(line);
+            
+            // Create the Directive object
+            ret = new OpeningDirective(directiveRg, paramStr);
+        }
+
+        // Middle keyword detected
+        else if (text.startsWithMiddleKeyword()) {
+            if (group !== undefined && group.directives.length > 0) {
+                // Find the directive range
+                const directiveRg = getKeywordRange(line, dico.middleKeywords);
+                if(!directiveRg) {
+                    log('Error: Middle keyword not found in line', line);
+                    return undefined;
+                }
+
+                // Find the param string
+                const paramStr = getConditionText(line);
+
+                // Find the hint and its range
+                const hintRg = new vscode.Range(line.lineNumber, directiveRg.end.character, line.lineNumber, line.range.end.character);
+                let hint = new Hint("", hintRg);
+                if (text.startsWith('#else')) {
+                    // Hint str is the negation of the last directive hint
+                    hint.text = this.getHintOfLastDirective(group)!;
+                    hint.NegateString();
+                }
+                else if (text.startsWith('#elif')) {
+                    // Hint text is the new condition
+                    hint.text = getConditionText(line);
+                    hint.modified = true;
+                }
+
+                // Create the Directive object
+                ret = new MiddleDirective(directiveRg, paramStr, hint);
+            }
+            else {
+                // TODO: Indicate bad syntax with squiggly underline
+            }
+        }
+
+        // Closing keyword detected
+        else if (text.startsWithClosingKeyword()) {
+            if (group !== undefined && group.directives.length > 0) {
+                // Find the directive range
+                const directiveRg = getKeywordRange(line, dico.closingKeywords);
+                if(!directiveRg) {
+                    log('Error: Closing keyword not found in line', line);
+                    return undefined;
+                }
+
+                // Find the param string
+                const paramStr = getConditionText(line);
+
+                // Find the hint. Text is equal to the last directive hint
+                const hintRg = new vscode.Range(line.lineNumber, directiveRg.end.character, line.lineNumber, line.range.end.character);
+                const hintStr = this.getHintOfLastDirective(group)!;
+                const hint = new Hint(hintStr, hintRg);
+
+                // Create the Directive object
+                ret = new ClosingDirective(directiveRg, paramStr, hint);
+            }
+            else {
+                // TODO: Indicate bad syntax with squiggly underline
+            }
+        }
+
+        return ret;
+    }
+    
+    /**
+     * @brief Add a directive to a group at a given position
+     * @param directive  The directive to add
+     * @param group  The group to add the directive to
+     * @param position  The position to add the directive at (optional)
+     */
+    addDirectiveToGroup(directive: Directive, group: DirectiveGroup, position?: number) {
+        // If position is not defined, add the directive at the end of the group
+        if (position === undefined) {
+            position = group.directives.length;
+        }
+
+        // Check for impossible positions
+        if (directive instanceof OpeningDirective && position > 0) {
+            log('Error: Cannot add an opening directive in the middle of a group');
+            return;
+        }
+        if (directive instanceof ClosingDirective && position < group.directives.length) {
+            log('Error: Cannot add a closing directive in the middle of a group');
+            return;
+        }
+        if (directive instanceof MiddleDirective && position === 0) {
+            log('Error: Cannot add a middle directive at the beginning of a group');
+            return;
+        }
+
+        // Add the directive to the group at the given position
+        group.directives.splice(position, 0, directive);
+
+        // TODO: Update all the hints below the added directive
+    }
+
+    /**
+     * @brief Update the data of the given editor. Should update display afterwards.
+     * @param editor  The text editor to update
+     */
+    updateData(editor: vscode.TextEditor) {
+        // Re-parse the file
+        const groups = this.parseFile(editor.document);
+        this.dataMap.set(editor, groups);
+
+        // TODO
+        // Doing re-parse for now. Not suitable for large files.
+        // Should only update the changed part of the file.
     }
 
     /**
@@ -376,38 +435,6 @@ export class Parser {
     }
 
     /**
-     * @brief Update the hint under the cursor in the dataMap (add, delete or modify). Should call displayHints() after.
-     * @param editor  The text editor to update
-     */
-    updateHints(editor: vscode.TextEditor) {
-        // Parse line under cursor
-        const position = editor.selection.active;
-
-        // Get the corresponding group in the dataMap
-        const fileGroups = this.dataMap.get(editor);
-        if (!fileGroups) {
-            return;
-        }
-
-        // Get the group containing the directive
-        const group = this.getGroupFromPosition(editor, position);
-        if (!group) {
-            return;
-        }
-
-        // TODO: Réutiliser le code de  parseFile() pour trouver le bon hint (extraire la fonction de recherche de hint)
-
-        // Get the hint under the cursor
-        const conditionText = getConditionText(editor.document.lineAt(position.line));
-        
-        // Update the hints of all the directives in the group
-        group.directives.forEach(d => {
-            // Update the hint text
-            d.hint.text = conditionText;
-        });
-    }
-
-    /**
      * @brief Display the hints in the editor
      * @param editor The text editor to display the hints in
      */
@@ -440,11 +467,10 @@ export class Parser {
 
             groups.forEach(g => {
                 g.directives.forEach(d => {
-                    // Do not display hints for the opening directive
-                    if(d === g.directives[0]) {
-                        return;
+                    // Display the hint for middle and closing directives
+                    if (d instanceof HintedDirective) {
+                        e.setDecorations(d.hint.decoType, [d.hint.range]);
                     }
-                    e.setDecorations(d.hint.decoType, [d.hint.range]);
                 });
             });
         });
@@ -466,7 +492,10 @@ export class Parser {
 
             groups.forEach(g => {
                 g.directives.forEach(d => {
-                    e.setDecorations(d.hint.decoType, []);
+                    // Remove the hint for middle and closing directives
+                    if (d instanceof HintedDirective) {
+                        e.setDecorations(d.hint.decoType, []);
+                    }
                 });
             });
         });
@@ -528,22 +557,76 @@ export class Parser {
     }
 
     /**
-     * @brief Get the group containing the directive at the given position
+     * @brief Get the directive at the given position
+     * @param editor The text editor to search in
+     * @param position The position to search from
+     * @returns A {@link DirectiveGroup}, or undefined if not found
+     */
+    getDirectiveFromPosition(editor: vscode.TextEditor, position: vscode.Position): Directive | undefined {
+        const groups = this.dataMap.get(editor);
+        if (!groups) {
+            return undefined;
+        }
+        return this.getGroupFromPosition(editor, position)?.directives.find(
+            d => d.range.start.line <= position.line && d.range.end.line >= position.line
+        );
+    }
+
+    /**
+     * @brief Get the group that encapsulate the position
      * @param editor The text editor to search in
      * @param position The position to search from
      * @returns A {@link DirectiveGroup}, or undefined if not found
      */
     getGroupFromPosition(editor: vscode.TextEditor, position: vscode.Position): DirectiveGroup | undefined {
+        let ret: DirectiveGroup | undefined = undefined;
+        
         const groups = this.dataMap.get(editor);
         if (!groups) {
             return undefined;
         }
-        return groups.find(
-            g => g.directives.some(
-                r => r.range.start.line <= position.line && r.range.end.line >= position.line
-            )
+        
+        // Find groups that contains the position
+        const containingGroups = groups.filter(g => {
+                // Check if the position is between the first and last directive of the group
+                if (g.directives[0].range.start.line <= position.line && g.directives[g.directives.length - 1].range.end.line >= position.line) {
+                    return true;
+                }
+                else {
+                    return false;
+                }
+            }
         );
+
+        // Return the group with the highest nesting level
+        if (containingGroups.length > 0) {
+            ret = containingGroups.reduce((prev, curr) => prev.level > curr.level ? prev : curr);
+        }
+
+        return ret;
     }
+
+    /**
+     * @brief Get the hint of the last directive in the group
+     * @param group The group to search in
+     * @returns The hint text of the last directive, or undefined if the group is empty
+     */
+    getHintOfLastDirective(group: DirectiveGroup): string | undefined {
+        if (group.directives.length > 0) {
+            const lastDirective = group.directives[group.directives.length - 1];
+            
+            // Handle the case where the last directive is a middle or closing directive
+            if (lastDirective instanceof HintedDirective) {
+                return lastDirective.hint.text;
+            }
+            // Handle the case where the last directive is an opening directive
+            else if (lastDirective instanceof Directive) {
+                return lastDirective.paramStr;
+            }
+        }
+        return undefined;
+    }
+
 }
 
 /**
