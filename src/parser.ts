@@ -16,6 +16,7 @@ export class Parser {
         this.currEditor = vscode.window.activeTextEditor;
         this.visibleEditors = [...vscode.window.visibleTextEditors];
         this.dataMap = new Map();
+        this.cancelSource = undefined;
     }
     
     /**
@@ -29,6 +30,8 @@ export class Parser {
     
         // Trigger the parser on extension activation
         this.parseEditor(this.visibleEditors);
+
+        // Display outlines
         this.outlineUnderCursor(this.currEditor);
 
         // Display the hints in current editor only if activeEditorOnly is set to true
@@ -56,10 +59,15 @@ export class Parser {
         // On every change in the text document
         vscode.workspace.onDidChangeTextDocument(event => {
             if (this.currEditor && (event.document === this.currEditor.document)) {
-                this.removeHints(this.currEditor);
-                this.updateData(this.currEditor);
-                this.outlineUnderCursor(this.currEditor);
-                this.displayHints(this.currEditor);
+                // TODO: Give changes content to updateData
+                const oldMap = new Map(this.dataMap);
+                this.updateData(this.currEditor).then(() => {
+                    if(this.currEditor !== undefined) {
+                        this.removeHints(this.currEditor, oldMap);
+                        this.outlineUnderCursor(this.currEditor);
+                        this.displayHints(this.currEditor);
+                    }
+                });
             }
         }, null, context.subscriptions);
     
@@ -95,26 +103,23 @@ export class Parser {
     /*** Attributes ***/
 
     /**
-     * @var currEditor
      * @brief The current text editor
      * @details This attribute is used to keep track of the current text editor.
-     * @type {vscode.TextEditor | undefined}
+     * @see {@link vscode.TextEditor}
      */
     private currEditor: vscode.TextEditor | undefined;
     
     /**
-     * @var visibleEditors
      * @brief The list of visible text editors
      * @details This list is used to keep track of the visible text editors.
-     * @type {vscode.TextEditor[]}
+     * @see {@link vscode.TextEditor}
      */
     private visibleEditors: vscode.TextEditor[];
 
     /**
-     * @var outlineDecoType
      * @brief The decoration type for the outlines
      * @details This attribute is used to keep track of the decoration type for the outlines.
-     * @type {vscode.TextEditorDecorationType}
+     * @see {@link vscode.TextEditorDecorationType}
      * @readonly
      */
     private readonly outlineDecoType: vscode.TextEditorDecorationType = 
@@ -124,6 +129,12 @@ export class Parser {
         overviewRulerColor: '#929292',  //Color
     });
 
+    /**
+     * @brief The decoration type for the scrollbar
+     * @details This attribute is used to keep track of the decoration type for the scrollbar.
+     * @see {@link vscode.TextEditorDecorationType}
+     * @readonly
+     */
     private readonly scrollbarDecoType: vscode.TextEditorDecorationType =
     vscode.window.createTextEditorDecorationType({
         isWholeLine: true,
@@ -131,7 +142,6 @@ export class Parser {
     });
 
     /**
-     * @var dataMap
      * @brief A map where each key is a vscode.TextEditor and each value is a DirectiveGroup Array.
      * @type {Map<vscode.TextEditor, DirectiveGroup[]>}
      * @see {@link DirectiveGroup}
@@ -142,88 +152,124 @@ export class Parser {
      */
     private dataMap: Map<vscode.TextEditor, DirectiveGroup[]>;
 
+    /**
+     * @brief The cancellation source for the parsing task
+     * @see {@link vscode.CancellationTokenSource}
+     */
+    private cancelSource: vscode.CancellationTokenSource | undefined;
+
     /*** Methods ***/
 
     /**
      * @brief Parse the whole file
      * @param editor The text editor to parse
      */
-    parseEditor(editor: vscode.TextEditor | vscode.TextEditor[] | undefined) {
+    async parseEditor(editor: vscode.TextEditor | vscode.TextEditor[] | undefined) {
         // Check Config
         const cfg = vscode.workspace.getConfiguration(extensionId);
         if (!cfg.get('enable')) {
-            return;
+            throw new Error('Extension is not enabled');
         }
 
         // Ensure editor is defined
         if (!editor) {
-            return;
+            throw new Error('Editor is not defined');
         }
+
+        // Cancel the previous parsing task if it exists
+        if(this.cancelSource) {
+            this.cancelSource.cancel();
+        }
+
+        // Generate token
+        this.cancelSource = new vscode.CancellationTokenSource();
+        const cancelToken = this.cancelSource.token;
 
         // Ensure we always work with an array
         const editors = Array.isArray(editor) ? editor : [editor];
 
         // Parse the given editor(s)
-        editors.forEach(e => {
+        for (const e of editors) {
             const doc = e.document;
-            const groups = this.parseFile(doc);
-            this.dataMap.set(e, groups);
-        });
+            
+            // Parse the file and store the groups in the dataMap
+            this.parseFile(doc, cancelToken).then(
+                // onFulfilled
+                groups => {
+                    this.dataMap.set(e, groups!);
+                },
+                // onRejected
+                error => {
+                    log(error);
+                }
+            );
+        }
     }
 
     /**
      * @brief Parse the given document and search for the directive groups
      * @param document The document to parse
+     * @param token Cancellation token to check for cancellation
      * @returns An array of DirectiveGroup objects. Can be empty.
      */
-    parseFile(document: vscode.TextDocument): DirectiveGroup[] {
-        let ret: DirectiveGroup[] = [];
-
-        log('Parsing file:', vscode.workspace.asRelativePath(document.fileName));
-
-        // Current nesting level
-        let currLevel = 0;  
-
-        // Lifo of current groups (index correspond to a relative nesting level)
-        let currGroups: DirectiveGroup[] = [new DirectiveGroup(undefined, 0)];
-
-        // Parse line by line
-        for (let line = 0; line < document.lineCount; line++) {
-            const text = document.lineAt(line).text;
-            
-            // Parse the line 
-            const directive = this.parseLine(document.lineAt(line), currGroups[currLevel]);
-
-            // If there is no directive, continue to the next line
-            if(!directive) {
-                continue;
+    async parseFile(document: vscode.TextDocument, cancelToken: vscode.CancellationToken): Promise<DirectiveGroup[] | undefined> {
+        return new Promise<DirectiveGroup[] | undefined>((resolve, reject) => {
+            let groups: DirectiveGroup[] = [];
+    
+            log('Parsing file:', vscode.workspace.asRelativePath(document.fileName));
+    
+            // Current nesting level
+            let currLevel = 0;
+    
+            // Lifo of current groups (index correspond to a relative nesting level)
+            let currGroups: DirectiveGroup[] = [new DirectiveGroup(undefined, 0)];
+    
+            // Parse line by line
+            for (let line = 0; line < document.lineCount; line++) {
+                // Check for cancellation before parsing each line
+                if (cancelToken.isCancellationRequested) {
+                    log('Parsing cancelled');
+                    reject(new Error('Parsing cancelled'));
+                }
+    
+                const text = document.lineAt(line).text;
+    
+                // Parse the line 
+                const directive = this.parseLine(document.lineAt(line), currGroups[currLevel]);
+    
+                // If there is no directive, continue to the next line
+                if (!directive) {
+                    continue;
+                }
+    
+                // Opening directive found
+                if (directive instanceof OpeningDirective) {
+                    // Create a new group
+                    const newGroup = new DirectiveGroup([directive], currLevel + 1);
+                    currGroups.push(newGroup);
+                    currLevel++;
+                }
+                // Middle directive found
+                else if (directive instanceof MiddleDirective) {
+                    // Add the directive to the current group
+                    currGroups[currLevel].directives.push(directive);
+                }
+                // Closing directive found
+                else if (directive instanceof ClosingDirective) {
+                    // Add the directive to the current group
+                    currGroups[currLevel].directives.push(directive);
+    
+                    // Add the group to the return array
+                    groups.push(currGroups.pop()!);
+    
+                    // Update nesting level
+                    currLevel -= 1;
+                }
             }
-
-            // Opening directive found
-            if (directive instanceof OpeningDirective) {
-                // Create a new group
-                const newGroup = new DirectiveGroup([directive], currLevel + 1);
-                currGroups.push(newGroup);
-                currLevel++;
-            }
-            // Middle directive found
-            else if (directive instanceof MiddleDirective) {
-                // Add the directive to the current group
-                currGroups[currLevel].directives.push(directive);
-            }
-            // Closing directive found
-            else if (directive instanceof ClosingDirective) {
-                // Add the directive to the current group
-                currGroups[currLevel].directives.push(directive);
-
-                // Add the group to the return array
-                ret.push(currGroups.pop()!);
-
-                // Update nesting level
-                currLevel -= 1;
-            }
-        }
-        return ret;
+    
+            // Resolve the promise with the groups array
+            resolve(groups);
+        });
     }
 
     /**
@@ -353,10 +399,9 @@ export class Parser {
      * @brief Update the data of the given editor. Should update display afterwards.
      * @param editor  The text editor to update
      */
-    updateData(editor: vscode.TextEditor) {
+    async updateData(editor: vscode.TextEditor) {
         // Re-parse the file
-        const groups = this.parseFile(editor.document);
-        this.dataMap.set(editor, groups);
+        this.parseEditor(editor);
 
         // FIXME: This is not efficient. Should only update the changed part of the file.
     }
@@ -469,13 +514,13 @@ export class Parser {
     /**
      * @brief Remove all the hint decorations from the given editor(s)
      */
-    removeHints(editor: vscode.TextEditor | vscode.TextEditor[]) {
+    removeHints(editor: vscode.TextEditor | vscode.TextEditor[], map: Map<vscode.TextEditor, DirectiveGroup[]> = this.dataMap) {
         // Ensure we always work with an array
         const editors = Array.isArray(editor) ? editor : [editor];
 
         // Remove the hints from the given editors
         editors.forEach(e => {
-            const groups = this.dataMap.get(e);
+            const groups = map.get(e);
             if (!groups) {
                 return;
             }
@@ -541,8 +586,9 @@ export class Parser {
         // Process added editors
         addedEditors.forEach(e => {
             this.visibleEditors.push(e);  // Add the new editors to the list
-            this.parseEditor(e);  // Parse the whole file
-            this.displayHints(e);  // Display the hints
+            this.parseEditor(e).then(() => {
+                this.displayHints(e);
+            });
         });
     }
 

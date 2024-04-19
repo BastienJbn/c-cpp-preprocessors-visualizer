@@ -8,7 +8,7 @@ int main() {
     int a,b;
 
 // Depth test
-#if defined C
+#if defined B
     int a = 1;
 
 // Middle keywords test
