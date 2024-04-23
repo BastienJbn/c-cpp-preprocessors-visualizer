@@ -6,7 +6,7 @@ export class DirectiveGroup {
     /*** Attributes ***/
     
     /**
-     * @brief Group's Array of {@link Directive}
+     * @brief Array of {@link Directive}
      */
     public directives: Array<Directive>;
 
@@ -29,6 +29,8 @@ export class DirectiveGroup {
      * @details
      * A group is completed if it has at least an opening and closing directive.
      * Always false when the group is created.
+     * 
+     * TODO: Currently not used, should be used to check if the group is valid.
      */
     public completed: boolean = false;
     

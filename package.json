@@ -14,7 +14,7 @@
     "onLanguage:c",
     "onLanguage:cpp"
   ],
-  "main": "./out/extension.js",
+  "main": "./out/main.js",
   "contributes": {
     "configuration": {
       "type": "object",

@@ -1,7 +1,10 @@
 import * as vscode from 'vscode';
 import { Hint } from './Hint';
-import { openingKeywords, middleKeywords, closingKeywords } from './dico';
 
+/**
+ * @brief Class representing a directive
+ * @abstract
+ */
 export abstract class Directive {
     /**
      * @brief Range of the directive
@@ -20,7 +23,8 @@ export abstract class Directive {
 }
 
 /**
- * @brief Interface for directives that contain a hint
+ * @brief Class representing a directive with a hint
+ * @abstract
  */
 export abstract class HintedDirective extends Directive {
     hint: Hint;
@@ -30,18 +34,27 @@ export abstract class HintedDirective extends Directive {
     }
 }
 
+/**
+ * @brief Class representing an opening directive
+ */
 export class OpeningDirective extends Directive {
     constructor(directive: vscode.Range, paramStr: string) {
         super(directive, paramStr);
     }
 }
 
+/**
+ * @brief Class representing a middle directive
+ */
 export class MiddleDirective extends HintedDirective {
     constructor(directive: vscode.Range, paramStr: string, hint: Hint) {
         super(directive, paramStr, hint);
     }
 }
 
+/**
+ * @brief Class representing a closing directive
+ */
 export class ClosingDirective extends HintedDirective {
     constructor(directive: vscode.Range, paramStr: string, hint: Hint) {
         super(directive, paramStr, hint);
