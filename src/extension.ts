@@ -4,12 +4,16 @@ import { extensionId, log } from './utils';
 import * as styles from './Styles';
 import { HintedDirective } from './Directive';
 import { DirectiveGroup } from './DirectiveGroup';
+import { resolve } from 'path';
+import { EventEmitter } from 'events';
+import { rejects } from 'assert';
 
 export class Extension {
     constructor() {
         this.parser = new Parser();
         this.currEditor = undefined;
         this.visibleEditors = [];
+        this.cancelEmitter = new EventEmitter();
     }
 
     public activate(context: vscode.ExtensionContext) {
@@ -19,18 +23,28 @@ export class Extension {
         
         this.registerCallbacks(context);
 
-        // Display hints and outlines
+        // Display outlines
         if (this.currEditor) {
             this.displayOutlines(this.currEditor);
         }
-        this.visibleEditors.forEach(e => {
-            this.displayHints(e);
-        });
+
+        // Display hints in all visible editors
+        this.displayHints(this.visibleEditors);
     }
 
     public deactivate() {
         log('Extension is deactivated');
-        // TODO Remove all decorations. Free parser resources.
+
+        // if (this.currEditor) {
+        //     this.removeOutlines(this.currEditor);
+        // }
+        
+        // this.visibleEditors.forEach(async e => {
+        //     const groups = await this.parser.get(e.document);
+        //     this.removeHints(e, groups);
+        // });
+
+        // TODO Free parser resources
     }
 
     /**
@@ -50,18 +64,7 @@ export class Extension {
 
         // On every change in the text document
         vscode.workspace.onDidChangeTextDocument(event => {
-            // Ignore if the event is not from the current editor
-            if (!this.currEditor || (event.document !== this.currEditor.document)) {
-                return;
-            }
-
-            // Ignore if there is no content change
-            if (event.contentChanges.length === 0) {
-                return;
-            }
-
-            this.onDocumentModified(event.document);
-
+            this.onDocumentModified(event);
         }, null, context.subscriptions);
 
         // On every change in the text editor selection
@@ -94,7 +97,16 @@ export class Extension {
      */
     private visibleEditors: vscode.TextEditor[];
 
+    /**
+     * @brief The parser object
+     * @details This object is used to parse the directives in text documents and keep track of them.
+     * @see {@link Parser}
+     */
     private parser: Parser;
+
+    private cancelEmitter: EventEmitter;
+
+    private parsingPromise: Promise<any> | undefined;
 
     /**
      * @brief Display or Update the outlines (if any)
@@ -103,7 +115,7 @@ export class Extension {
      * Get the group of directives under cursor and apply the outline decoration.
      * If there is a selection, remove the outlines.
      */
-    displayOutlines(editor: vscode.TextEditor) {
+    async displayOutlines(editor: vscode.TextEditor) {
         // If the extension or the feature are disabled, do nothing
         const cfg = vscode.workspace.getConfiguration(extensionId);
         if (!cfg.get('enable') || !cfg.get('outlines.enable')) {
@@ -126,22 +138,19 @@ export class Extension {
         const position = editor.selection.active;
         
         // Get the corresponding group in the dataMap
-        const fileGroups = this.parser.get(editor.document);
-        if (!fileGroups) {
-            throw new Error('Parsing not done for the current file yet');
-            // TODO handle error
-        }
+        const fileGroups = await this.parser.get(editor.document);
         const group = fileGroups.find(
             g => g.directives.some(
                 r => r.range.start.line <= position.line && r.range.end.line >= position.line
             )
         );
-        
+
         // Get the range to outline
         let keywordRanges: vscode.Range[] = [];
         if (group) {
             keywordRanges = group.directives.map(d => d.range);
         }
+        
         // Set the decorations to detected ranges, or remove them if none 
         editor.setDecorations(styles.outlineDecoType, keywordRanges);
         editor.setDecorations(styles.scrollbarDecoType, keywordRanges);
@@ -172,7 +181,7 @@ export class Extension {
         const editors = Array.isArray(editor) ? editor : [editor];
 
         // Display the hints in the given editors
-        editors.forEach(e => {
+        editors.forEach(async e => {
             const doc = e.document;
 
             // If activeEditorOnly, display in the current editor only
@@ -180,10 +189,7 @@ export class Extension {
                 return;
             }
 
-            const groups = this.parser.get(doc);
-            if (!groups) {
-                return;
-            }
+            const groups = await this.parser.get(doc);
 
             groups.forEach(g => {
                 g.directives.forEach(d => {
@@ -214,7 +220,7 @@ export class Extension {
      * @brief Editor changed event handler
      * @param newEditor The new text editor
      */
-    activeEditorChanged(newEditor: vscode.TextEditor | undefined) {
+    async activeEditorChanged(newEditor: vscode.TextEditor | undefined) {
         if(!newEditor) {
             log('Editor changed to undefined');
         }
@@ -231,10 +237,8 @@ export class Extension {
         const cfg = vscode.workspace.getConfiguration(extensionId);
         if (cfg.get('hints.activeEditorOnly')) {
             if(this.currEditor) {
-                const groups = this.parser.get(this.currEditor.document);
-                if (groups) {
-                    this.removeHints(this.currEditor, groups);
-                }
+                const groups = await this.parser.get(this.currEditor.document);
+                this.removeHints(this.currEditor, groups);
             }
         }
 
@@ -261,9 +265,9 @@ export class Extension {
         const removedEditors = oldEditors.filter(e => !newEditors.includes(e));
 
         // Process removed editors
-        if (removedEditors.length > 0) {
-            this.visibleEditors = this.visibleEditors.filter(e => !removedEditors.includes(e));  // Remove the missing editors from list
-        }
+        removedEditors.forEach(e => {
+            // TODO: Anything to do here?
+        });
 
         // Process added editors
         addedEditors.forEach(e => {
@@ -276,25 +280,52 @@ export class Extension {
      * @brief Document modified event handler
      * @param document The modified text document
      */
-    onDocumentModified(document: vscode.TextDocument) {
-        // TODO Parse the document and update the hints and outlines
+    private onDocumentModified(event: vscode.TextDocumentChangeEvent) {
+        log('Document modified at time: ', new Date().toLocaleTimeString());
 
-        // Get the old and new groups
-        const oldGroups = this.parser.get(document);
-        if (oldGroups === undefined) {
-            throw new Error('Modified document is not known to the parser yet!');
+        // Ignore if the event is not from the current editor
+        if (!this.currEditor || (event.document !== this.currEditor.document)) {
+            return;
         }
-        this.parser.update(document);
 
-        // Find in wich visible editors the document is open, and update hints and outlines
-        this.visibleEditors.filter(e => e.document === document).forEach(e => {
-            // Remove hints and outlines
-            this.removeHints(e, oldGroups);
-            this.removeOutlines(e);
-            // Display hints and outlines
-            this.displayHints(e);
-            this.displayOutlines(e);
-        });
+        // Ignore if there is no content change
+        if (event.contentChanges.length === 0) {
+            return;
+        }
+
+        const document = event.document;
+
+        // Get the old groups
+        this.parser.get(document)
+            .catch(() => { return []; })
+            .then(oldGroups => {
+                // Update the parser and get the new groups
+                this.parser.update(document).then(() => {
+                    // Find in which visible editors the document is open, and update hints and outlines
+                    this.visibleEditors.filter(e => e.document === document).forEach(e => {
+                        this.updateDisplay(e, oldGroups);
+                    });
+                });
+            });
+
+        // TODO: Optimize this by only updating the lines containing directives or contained in any directive group
+    }
+
+    /**
+     * @brief Update the hints and outlines in the given editor
+     * @param doc The text editor to update the hints and outlines in
+     * @param oldGroups The old directive groups
+     */
+    private updateDisplay(doc: vscode.TextEditor, oldGroups: DirectiveGroup[]) {
+        // Update hints
+        this.removeHints(doc, oldGroups);
+        this.displayHints(doc);
+
+        // Update outlines
+        if(doc === this.currEditor) {
+            this.removeOutlines(doc);
+            this.displayOutlines(doc);
+        }
     }
 
     /**
@@ -302,16 +333,10 @@ export class Extension {
      */
     private onConfigurationChanged() {
         // Remove all hints and outlines
-        this.visibleEditors.forEach(e => {
-            const groups = this.parser.get(e.document);
-            if (!groups) {
-                return;
-            }
-
+        this.visibleEditors.forEach(async e => {
+            const groups = await this.parser.get(e.document);
             this.removeHints(e, groups);
             this.removeOutlines(e);
         });
-
-        // TODO Trigger the parser for all the files. Display hints and outlines
     }
 }
