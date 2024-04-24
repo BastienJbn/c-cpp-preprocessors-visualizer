@@ -6,7 +6,6 @@ import { DirectiveGroup } from './DirectiveGroup';
 import { Directive, HintedDirective, OpeningDirective, MiddleDirective, ClosingDirective } from './Directive';
 import * as tools from './ParserTools';
 import * as dico from './Dictionnary';
-import { EventEmitter } from 'events';
 
 export class Parser {
     //##############//
@@ -16,54 +15,35 @@ export class Parser {
     constructor() {
         // Initialize attributes
         this.dataMap = new Map();
-        this.emitter = new EventEmitter();
     }
 
     /**
      * @brief Get the directive groups of the given document
-     * @param document  The document to get the groups from
-     * @returns  An array of {@link DirectiveGroup} objects, or undefined
+     * @param document The document to get the groups from
+     * @returns An array of {@link DirectiveGroup} objects, or undefined
      */
-    public get(document: vscode.TextDocument): Promise<DirectiveGroup[]> {
-        return new Promise((resolve, reject) => {
-            // Try to get the groups from the map
-            let groups = this.dataMap.get(document);
-
-            // If the groups are not in the map, parse the document
-            if (groups === undefined) {
-                log("Unknow document, parsing", document.fileName);
-                
-                this.parse(document)
-                    .then((value) => {
-                        groups = value;
-                        this.dataMap.set(document, groups);
-                        resolve(groups);
-                    })
-                    .catch((reason) => {
-                        log("Parsing failed: ", reason);
-                        reject(reason);
-                    });
-            }
-            else {
-                resolve(groups);
-            }
-        });
+    public get(document: vscode.TextDocument): DirectiveGroup[] | undefined {
+        return this.dataMap.get(document);
     }
 
-    public update(document: vscode.TextDocument): Promise<DirectiveGroup[]> {
-        return new Promise((resolve, reject) => {
-            // Parse the document
-            this.parse(document)
-                .catch((reason) => {
-                    log("Parsing failed: ", reason);
-                    reject(reason);
-                    return [];
-                })
-                .then((value) => {
-                    this.dataMap.set(document, value);
-                    resolve(value);
-                });
-        });
+    /**
+     * @brief Update the directive groups of the given document
+     * @param document  The document to update
+     * @returns  An array of {@link DirectiveGroup} objects
+     */
+    public update(document: vscode.TextDocument): DirectiveGroup[] {
+        const groups = this.parse(document);
+        this.dataMap.set(document, groups);
+        return groups;
+    }
+
+    /**
+     * @brief Modify data according to the given event
+     * @param document The document to modify
+     * @param event The event that triggered the modification
+     */
+    public modify(document: vscode.TextDocument, event : readonly vscode.TextDocumentContentChangeEvent[]) {
+        // TODO : Implement this method
     }
 
     //#################//
@@ -82,101 +62,64 @@ export class Parser {
      * It is used to store all directives of a file, in their corresponding group.
      */
     private dataMap: Map<vscode.TextDocument, DirectiveGroup[]>;
-
-    private emitter: EventEmitter;
-
-    private isRunning: boolean = false;
-
+    
     /*** Methods ***/
 
     /**
      * @brief Parse the given document and search for the directive groups
      * @param document The document to parse
-     * @param token Cancellation token to check for cancellation
      * @returns An array of DirectiveGroup objects. Can be empty.
      */
-    private parse(document: vscode.TextDocument): Promise<DirectiveGroup[]> {
-        return new Promise(async (resolve, reject) => {
-            let cancelSignal = false;
-            
-            // If file is not C or C++, return undefined
-            if (!(document.languageId === 'c' || document.languageId === 'cpp' || document.languageId === 'h' || document.languageId === 'hpp')) {
-                log('Parsing error: File is not a C or C++ file');
-                throw new Error('Parsing error: File is not a C or C++ file');
+    private parse(document: vscode.TextDocument): DirectiveGroup[] {
+        // If file is not C or C++, return undefined
+        if (!(document.languageId === 'c' || document.languageId === 'cpp' || document.languageId === 'h' || document.languageId === 'hpp')) {
+            throw new Error('File is not a C or C++ file');
+        }
+    
+        // Array of groups to return
+        let groups: DirectiveGroup[] = [];
+    
+        // Current nesting level
+        let currLevel = 0;
+    
+        // Lifo of current groups (index correspond to a relative nesting level)
+        let currGroups: DirectiveGroup[] = [new DirectiveGroup(undefined, 0)];
+    
+        // Parse line by line
+        for (let line = 0; line < document.lineCount; line++) {
+            // Parse the line 
+            const directive = this.parseLine(document.lineAt(line), currGroups[currLevel]);
+    
+            // If there is no directive, continue to the next line
+            if (!directive) {
+                continue;
             }
-
-            if (this.isRunning) {
-
-                log('Cancel requested');
+    
+            // Opening directive found
+            if (directive instanceof OpeningDirective) {
+                // Create a new group
+                const newGroup = new DirectiveGroup([directive], currLevel + 1);
+                currGroups.push(newGroup);
+                currLevel++;
             }
-            this.isRunning = true;
-            
-            // Listen for cancellation
-            const listener = this.emitter.once('cancel', () => {
-                cancelSignal = true;
-                reject('Parsing cancelled');
-                return;
-            });
-
-            // Array of groups to return
-            let groups: DirectiveGroup[] = [];
-
-            // Current nesting level
-            let currLevel = 0;
-
-            // Lifo of current groups (index correspond to a relative nesting level)
-            let currGroups: DirectiveGroup[] = [new DirectiveGroup(undefined, 0)];
-
-            // Parse line by line
-            for (let line = 0; line < document.lineCount; line++) {
-                // Check for cancellation
-                if (cancelSignal === true) {
-                    reject('Parsing cancelled');
-                    this.isRunning = false;
-                    return [];
-                }
-
-                // Parse the line 
-                const directive = this.parseLine(document.lineAt(line), currGroups[currLevel]);
-
-                // If there is no directive, continue to the next line
-                if (!directive) {
-                    continue;
-                }
-
-                // Opening directive found
-                if (directive instanceof OpeningDirective) {
-                    // Create a new group
-                    const newGroup = new DirectiveGroup([directive], currLevel + 1);
-                    currGroups.push(newGroup);
-                    currLevel++;
-                }
-                // Middle directive found
-                else if (directive instanceof MiddleDirective) {
-                    // Add the directive to the current group
-                    currGroups[currLevel].directives.push(directive);
-                }
-                // Closing directive found
-                else if (directive instanceof ClosingDirective) {
-                    // Add the directive to the current group
-                    currGroups[currLevel].directives.push(directive);
-
-                    // Add the group to the return array
-                    groups.push(currGroups.pop()!);
-
-                    // Update nesting level
-                    currLevel -= 1;
-                }
+            // Middle directive found
+            else if (directive instanceof MiddleDirective) {
+                // Add the directive to the current group
+                currGroups[currLevel].directives.push(directive);
             }
-
-            // Update running status
-            this.isRunning = false;
-
-            // Remove the listener
-            this.emitter.removeAllListeners('cancel');
-
-            resolve(groups);
-        });
+            // Closing directive found
+            else if (directive instanceof ClosingDirective) {
+                // Add the directive to the current group
+                currGroups[currLevel].directives.push(directive);
+    
+                // Add the group to the return array
+                groups.push(currGroups.pop()!);
+    
+                // Update nesting level
+                currLevel -= 1;
+            }
+        }
+        return groups;
     }
 
     /**
