@@ -8,7 +8,7 @@ export class DirectiveGroup {
     /**
      * @brief Array of {@link Directive}
      */
-    public directives: Array<Directive>;
+    public directives: Array<Directive> = [];
 
     /**
      * @brief Group level
@@ -21,7 +21,7 @@ export class DirectiveGroup {
      * #endif
      * #endif
      */
-    public level: number;
+    public level: number = 0;
 
     /**
      * @brief Boolean indicating if the group is completed

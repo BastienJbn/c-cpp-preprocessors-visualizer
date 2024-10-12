@@ -12,18 +12,18 @@ export abstract class Directive {
     public range: vscode.Range;
 
     /**
-     * @brief String containing the parameters of the directive
+     * @brief String containing the condition of the directive
      */
-    public paramStr: string;
+    public condition: string;
 
-    constructor(directive: vscode.Range, paramStr: string) {
-        this.range = directive;
-        this.paramStr = paramStr;
+    constructor(range: vscode.Range, condition: string) {
+        this.range = range;
+        this.condition = condition;
     }
 }
 
 /**
- * @brief Class representing a directive with a hint
+ * @brief Class representing a directive that should be displayed with a hint
  * @abstract
  */
 export abstract class HintedDirective extends Directive {
@@ -44,11 +44,20 @@ export class OpeningDirective extends Directive {
 }
 
 /**
- * @brief Class representing a middle directive
+ * @brief Class representing a middle hinted directive
  */
-export class MiddleDirective extends HintedDirective {
+export class MiddleHintedDirective extends HintedDirective {
     constructor(directive: vscode.Range, paramStr: string, hint: Hint) {
         super(directive, paramStr, hint);
+    }
+}
+
+/**
+ * @brief Class representing a middle directive
+ */
+export class MiddleDirective extends Directive {
+    constructor(directive: vscode.Range, paramStr: string) {
+        super(directive, paramStr);
     }
 }
 
@@ -59,4 +68,12 @@ export class ClosingDirective extends HintedDirective {
     constructor(directive: vscode.Range, paramStr: string, hint: Hint) {
         super(directive, paramStr, hint);
     }
+}
+
+// Define an enum to represent the different types of preprocessor directives
+export enum DirectiveType {
+    Opening,
+    Middle,
+    MiddleHinted,
+    Closing,
 }

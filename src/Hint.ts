@@ -40,7 +40,7 @@ export class Hint {
 
     /**
      * Creates a new instance of the Hint class.
-     * @param DecoType The decoration type for the hint.
+     * @param Text The text of the hint
      * @param Range The range of the hint in the editor.
      */
     constructor(Text: string, Range: vscode.Range) {

@@ -1,18 +1,11 @@
 import * as vscode from 'vscode';
 import { Parser } from './Parser';
-import { extensionId, log } from './utils';
+import { extensionId, log } from './Utils';
 import * as styles from './Styles';
 import { HintedDirective } from './Directive';
 import { DirectiveGroup } from './DirectiveGroup';
 
 export class Extension {
-    constructor() {
-        this.parser = new Parser();
-        this.currEditor = undefined;
-        this.visibleEditors = [];
-        this.id = 0;
-    }
-
     public activate(context: vscode.ExtensionContext) {
         log('Extension is active');
         this.currEditor = vscode.window.activeTextEditor;
@@ -21,16 +14,16 @@ export class Extension {
         this.registerCallbacks(context);
 
         // Parse all the visible editors
-        this.visibleEditors.forEach(async e => {
-            this.parser.update(e.document);
-            
+        this.visibleEditors.forEach(async editor => {
+            this.parser.parseDocument(editor.document);
+
             // Display outlines
-            if (e === this.currEditor) {
-                this.displayOutlines(e);
+            if (editor === this.currEditor) {
+                this.displayOutlines(editor);
             }
 
             // Display hints in all visible editors
-            this.displayHints(e);
+            this.displayHints(editor);
         });
     }
 
@@ -107,23 +100,21 @@ export class Extension {
      * @details This attribute is used to keep track of the current text editor.
      * @see {@link vscode.TextEditor}
      */
-    private currEditor: vscode.TextEditor | undefined;
+    private currEditor: vscode.TextEditor | undefined = undefined;
 
     /**
      * @brief The list of visible text editors
      * @details This list is used to keep track of the visible text editors.
      * @see {@link vscode.TextEditor}
      */
-    private visibleEditors: vscode.TextEditor[];
+    private visibleEditors: vscode.TextEditor[] = [];
 
     /**
      * @brief The parser object
      * @details This object is used to parse the directives in text documents and keep track of them.
      * @see {@link Parser}
      */
-    private parser: Parser;
-
-    private id: number;
+    private parser: Parser = new Parser();
 
     /**
      * @brief Display or Update the outlines (if any)
@@ -187,7 +178,7 @@ export class Extension {
 
     /**
      * @brief Display the hints in the editor
-     * @param editor The text editor to display the hints in
+     * @param editor Single or Array of {@link vscode.TextEditor} to display the hints in
      */
     displayHints(editor: vscode.TextEditor | vscode.TextEditor[]) {
         // Check Config
@@ -296,8 +287,8 @@ export class Extension {
 
         // Process added editors
         addedEditors.forEach(e => {
-            this.parser.update(e.document);
             this.visibleEditors.push(e);  // Add the new editors to the list
+            this.parser.parseDocument(e.document);
             this.displayHints(e);
         });
     }
@@ -307,14 +298,18 @@ export class Extension {
      * @param document The modified text document
      */
     private async onDocumentModified(event: vscode.TextDocumentChangeEvent) {
+        if(event.contentChanges.length === 0) {
+            return;
+        }
         log('Document modified: ', vscode.workspace.asRelativePath(event.document.fileName));
 
-        const document = event.document;
+        // Save current data
+        let oldState = this.parser.get(event.document)!;
 
         // Update the parser data
-        this.parser.modify(document, event.contentChanges);
+        this.parser.updateDocument(event.document, event.contentChanges);
 
-        // TODO: Optimize this by only updating the lines containing directives or contained in any directive group
+        this.updateDisplay(this.currEditor!, oldState);
     }
 
     /**
