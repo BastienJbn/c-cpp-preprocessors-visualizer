@@ -24,7 +24,12 @@ export class Parser {
      * @param document The document to parse
      * @returns An array of DirectiveGroup objects. Can be empty.
      */
-    public async parseDocument(document: vscode.TextDocument) {
+    public async parseDocument(document: vscode.TextDocument, signal: AbortSignal) {
+        // Check if the operation has already been aborted
+        if (signal.aborted) {
+            throw new Error("Cancelled");
+        }
+
         // If file is not C or C++, return undefined
         if (!(document.languageId === 'c' || document.languageId === 'cpp' || document.languageId === 'h' || document.languageId === 'hpp')) {
             log('File is not a C or C++ file');
@@ -38,6 +43,11 @@ export class Parser {
     
         // Parse line by line
         for (let line = 0; line < document.lineCount; line++) {
+            // Check if the operation has been aborted
+            if (signal.aborted) {
+                throw new Error("Cancelled");
+            }
+
             // Parse the line 
             const directive = this.parseLine(document.lineAt(line));
     

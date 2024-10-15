@@ -1,9 +1,8 @@
 import * as vscode from 'vscode';
 import { Parser } from './Parser';
 import { extensionId, log } from './Utils';
-import * as styles from './Styles';
-import { HintedDirective } from './Directive';
 import { DirectiveGroup } from './DirectiveGroup';
+import { Renderer } from './Renderer';
 
 export class Extension {
     public activate(context: vscode.ExtensionContext) {
@@ -15,22 +14,22 @@ export class Extension {
 
         // Parse all the visible editors
         this.visibleEditors.forEach(async editor => {
-            this.parser.parseDocument(editor.document);
-
-            // Display outlines
-            if (editor === this.currEditor) {
-                this.displayOutlines(editor);
-            }
-
-            // Display hints in all visible editors
-            this.displayHints(editor);
+            this.updateDocument(editor.document).then(_ => {
+                // Display outlines
+                if (editor === this.currEditor) {
+                    this.renderer.displayOutlines(editor, this.parser.get(editor.document));
+                }
+    
+                // Display hints in all visible editorsremoveHints
+                this.renderer.displayHints(editor, this.parser.get(editor.document));
+            });
         });
     }
 
     public deactivate() {
         // Remove the outlines from the current editor
         if (this.currEditor) {
-            this.removeOutlines(this.currEditor);
+            this.renderer.removeOutlines(this.currEditor);
         }
 
         // Remove all hints from visible editors or only from the current editor if activeEditorOnly is set
@@ -39,14 +38,14 @@ export class Extension {
             if(this.currEditor) {
                 const groups = this.parser.get(this.currEditor.document);
                 if (groups) {
-                    this.removeHints(this.currEditor, groups);
+                    this.renderer.removeHints(this.currEditor, groups);
                 }
             }
         } else {
             this.visibleEditors.forEach(async e => {
                 const groups = this.parser.get(e.document);
                 if (groups) {
-                    this.removeHints(e, groups);
+                    this.renderer.removeHints(e, groups);
                 }
             });
         }
@@ -83,7 +82,7 @@ export class Extension {
         vscode.window.onDidChangeTextEditorSelection(event => {
             // Ignore if event is not from the current editor
             if (this.currEditor && (event.textEditor === this.currEditor)) {
-                this.displayOutlines(this.currEditor); // update outlines
+                this.renderer.displayOutlines(this.currEditor, this.parser.get(this.currEditor.document)); // update outlines
             }
         }, null, context.subscriptions);
 
@@ -117,123 +116,27 @@ export class Extension {
     private parser: Parser = new Parser();
 
     /**
-     * @brief Display or Update the outlines (if any)
-     * @param editor The text editor to highlight the pair in
-     * @details 
-     * Get the group of directives under cursor and apply the outline decoration.
-     * If there is a selection, remove the outlines.
+     * @brief The renderer object
+     * @details This object is used to render Outline, Hints and ScrollBar decorations.
+     * @see {@link Renderer}
      */
-    displayOutlines(editor: vscode.TextEditor) {
-        // If the extension or the feature are disabled, do nothing
-        const cfg = vscode.workspace.getConfiguration(extensionId);
-        if (!cfg.get('enable') || !cfg.get('outlines.enable')) {
-            return;
-        }
-
-        // Language should be C or C++
-        const languageId = editor.document.languageId;
-        if ( !(languageId === 'c' || languageId === 'cpp' || languageId === 'h' || languageId === 'hpp') ) {
-            return;
-        }
-
-        // Should not outline when there is a selection
-        const selection = editor.selection;
-        if (!selection.start.isEqual(selection.end)) {
-            editor.setDecorations(styles.outlineDecoType, []); // Remove the outlines
-            return;
-        }
-
-        const position = editor.selection.active;
-        
-        // Get the corresponding group in the dataMap
-        const fileGroups = this.parser.get(editor.document);
-        if (!fileGroups) {
-            return;
-        }
-
-        const group = fileGroups.find(
-            g => g.directives.some(
-                r => r.range.start.line <= position.line && r.range.end.line >= position.line
-            )
-        );
-
-        // Get the range to outline
-        let keywordRanges: vscode.Range[] = [];
-        if (group) {
-            keywordRanges = group.directives.map(d => d.range);
-        }
-        
-        // Set the decorations to detected ranges, or remove them if none 
-        editor.setDecorations(styles.outlineDecoType, keywordRanges);
-        editor.setDecorations(styles.scrollbarDecoType, keywordRanges);
-    }
+    private renderer: Renderer = new Renderer();
 
     /**
-     * @brief Remove all the outline decorations from the current editor
+     * @brief The controller in charge of cancelling parsing operations.
      */
-    removeOutlines(editor: vscode.TextEditor) {
-        editor.setDecorations(styles.outlineDecoType, []);
-        editor.setDecorations(styles.scrollbarDecoType, []);
-    }
+    private controller: AbortController = new AbortController();
 
     /**
-     * @brief Display the hints in the editor
-     * @param editor Single or Array of {@link vscode.TextEditor} to display the hints in
+     * @brief Map of parsing promise per document. The promise is valid when a parsing operation is running, or undefined otherwise.
      */
-    displayHints(editor: vscode.TextEditor | vscode.TextEditor[]) {
-        // Check Config
-        const cfg = vscode.workspace.getConfiguration(extensionId);
-        if (!cfg.get('enable') || !cfg.get('hints.enable')) {
-            return;
-        }
-
-        // Ensure we always work with an array
-        const editors = Array.isArray(editor) ? editor : [editor];
-
-        // Display the hints in the given editors
-        editors.forEach(e => {
-            const doc = e.document;
-
-            // If activeEditorOnly, display in the current editor only
-            if (cfg.get('hints.activeEditorOnly') && e !== this.currEditor) {
-                return;
-            }
-
-            const groups = this.parser.get(doc);
-            if (!groups) {
-                return;
-            }
-
-            groups.forEach(g => {
-                g.directives.forEach(d => {
-                    // Display the hint for middle and closing directives
-                    if (d instanceof HintedDirective) {
-                        e.setDecorations(d.hint.decoType, [d.hint.range]);
-                    }
-                });
-            });
-        });
-    }
-
-    /**
-     * @brief Remove all the hint decorations from the given editor(s)
-     */
-    removeHints(editor: vscode.TextEditor, groups: DirectiveGroup[]) {
-        groups.forEach(g => {
-            g.directives.forEach(d => {
-                // Remove the hint for middle and closing directives
-                if (d instanceof HintedDirective) {
-                    editor.setDecorations(d.hint.decoType, []);
-                }
-            });
-        });
-    }
+    private parsingPromises : Map<vscode.TextDocument, Promise<void> | undefined> = new Map();
 
     /**
      * @brief Editor changed event handler
      * @param newEditor The new text editor
      */
-    activeEditorChanged(newEditor: vscode.TextEditor | undefined) {
+    private activeEditorChanged(newEditor: vscode.TextEditor | undefined) {
         if(!newEditor) {
             log('Editor changed to undefined');
         }
@@ -243,7 +146,7 @@ export class Extension {
         
         // Remove the outlines from the old editor
         if (this.currEditor) {
-            this.removeOutlines(this.currEditor);
+            this.renderer.removeOutlines(this.currEditor);
         }
 
         // If the setting is set to activeEditorOnly, remove hints from old editor
@@ -254,7 +157,7 @@ export class Extension {
                 if (!groups) {
                     return;
                 }
-                this.removeHints(this.currEditor, groups);
+                this.renderer.removeHints(this.currEditor, groups);
             }
         }
 
@@ -263,8 +166,8 @@ export class Extension {
 
         // Update new editor
         if(this.currEditor) {
-            this.displayOutlines(this.currEditor);
-            this.displayHints(this.currEditor);
+            this.renderer.displayOutlines(this.currEditor, this.parser.get(this.currEditor.document));
+            this.renderer.displayHints(this.currEditor, this.parser.get(this.currEditor.document));
         }
     }
 
@@ -272,7 +175,7 @@ export class Extension {
      * @brief Visible editors changed event handler
      * @param newEditors The new list of visible text editors
      */
-    visibleEditorsChanged(newEditors: readonly vscode.TextEditor[]) {
+    private visibleEditorsChanged(newEditors: readonly vscode.TextEditor[]) {
         log('Visible editors changed');
 
         // Compare differences between the old and new visible editors
@@ -288,8 +191,9 @@ export class Extension {
         // Process added editors
         addedEditors.forEach(e => {
             this.visibleEditors.push(e);  // Add the new editors to the list
-            this.parser.parseDocument(e.document);
-            this.displayHints(e);
+            this.updateDocument(e.document).then(_ => {
+                this.renderer.displayHints(e, this.parser.get(e.document));
+            });
         });
     }
 
@@ -297,7 +201,7 @@ export class Extension {
      * @brief Document modified event handler
      * @param document The modified text document
      */
-    private async onDocumentModified(event: vscode.TextDocumentChangeEvent) {
+    private onDocumentModified(event: vscode.TextDocumentChangeEvent) {
         if(event.contentChanges.length === 0) {
             return;
         }
@@ -307,25 +211,30 @@ export class Extension {
         let oldState = this.parser.get(event.document)!;
 
         // Update the parser data
-        this.parser.parseDocument(event.document);
-
-        this.updateDisplay(this.currEditor!, oldState);
+        this.updateDocument(event.document).then(_ => {
+            this.updateDisplay(this.currEditor!, oldState);
+        });
     }
 
     /**
      * @brief Update the hints and outlines in the given editor
-     * @param doc The text editor to update the hints and outlines in
-     * @param oldGroups The old directive groups
+     * @param editor The text editor to update the hints and outlines in
+     * @param oldGroups The old directive groups (can be ommitted if first time displaying this file)
      */
-    private updateDisplay(doc: vscode.TextEditor, oldGroups: DirectiveGroup[]) {
+    private updateDisplay(editor: vscode.TextEditor, oldGroups: DirectiveGroup[] | undefined) {
         // Update hints
-        this.removeHints(doc, oldGroups);
-        this.displayHints(doc);
+        if(oldGroups !== undefined && oldGroups.length >= 0) {
+            this.renderer.removeHints(editor, oldGroups);
+        }
+        this.renderer.displayHints(editor, this.parser.get(editor.document));
 
         // Update outlines
-        if(doc === this.currEditor) {
-            this.removeOutlines(doc);
-            this.displayOutlines(doc);
+        if(editor === this.currEditor) {
+            
+            if(oldGroups !== undefined) {
+                this.renderer.removeOutlines(editor);
+            }
+            this.renderer.displayOutlines(editor, this.parser.get(editor.document));
         }
     }
 
@@ -342,9 +251,41 @@ export class Extension {
         this.visibleEditors.forEach(e => {
             const groups = this.parser.get(e.document);
             if (groups) {
-                this.removeHints(e, groups);
+                this.renderer.removeHints(e, groups);
             }
-            this.removeOutlines(e);
+            this.renderer.removeOutlines(e);
         });
+    }
+
+    /**
+     * @brief Update the document index data. If a parsing operation was already ongoing on this document, cancel it and re-run.
+     */
+    private async updateDocument(document: vscode.TextDocument) {
+        // Get promise corresponding to document
+        let promise = this.parsingPromises.get(document);
+
+        if (promise !== undefined) {
+            this.controller.abort();
+            await promise;
+        }
+
+        // Start new parsing operation and save it to map
+        promise = this.parser.parseDocument(document, this.controller.signal);
+
+        // Save promise in map
+        this.parsingPromises.set(document, promise);
+
+        // Return callback
+        promise.then(_ => {
+            // Reset promise, either when returning or cancelling
+            // as it produce the same behaviour
+            this.parsingPromises.set(document, undefined);
+        })
+        // Cancel callback
+        .catch(() => {
+
+        });
+
+        return promise;
     }
 }
