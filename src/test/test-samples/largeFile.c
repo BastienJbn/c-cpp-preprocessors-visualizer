@@ -1,6 +1,8 @@
 #define A
 #define B
 
+#if 1
+
 #ifdef A
     int a = 1;
     #ifdef B
@@ -840,3 +842,6 @@
 
 #undef A
 #undef B
+
+
+#endif

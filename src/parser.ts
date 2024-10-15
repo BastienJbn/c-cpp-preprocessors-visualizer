@@ -54,15 +54,25 @@ export class Parser {
                 currLevel++;
             }
             // Middle directive found
-            else if (directive instanceof MiddleDirective) {
+            else if ((directive instanceof MiddleDirective) || (directive instanceof MiddleHintedDirective)) {
                 // Add the directive to the current group
-                this.currGroups[currLevel-1].directives.push(directive);
+                try {
+                    this.currGroups[currLevel-1].directives.push(directive);
+                }
+                catch(e) {
+                    continue;
+                }
             }
             // Closing directive found
             else if (directive instanceof ClosingDirective) {
                 // Add the directive to the current group
-                this.currGroups[currLevel-1].directives.push(directive);
-    
+                try {
+                    this.currGroups[currLevel-1].directives.push(directive);
+                }
+                catch(e) {
+                    continue;
+                }
+
                 // Add the group to the return array
                 groups.push(this.currGroups.pop()!);
     
@@ -72,17 +82,6 @@ export class Parser {
         }
         
         this.dataMap.set(document, groups);
-    }
-
-    /**
-     * @brief Update data according to the given event
-     * @param document The document to modify
-     * @param event The event that triggered the modification
-     */
-    public async updateDocument(document: vscode.TextDocument, event : readonly vscode.TextDocumentContentChangeEvent[]) {
-        this.parseDocument(document);
-        
-        // TODO : Optimize this function to only parse changed section
     }
 
     //#################//
@@ -217,101 +216,24 @@ export class Parser {
      * @param group The group to search in
      * @returns The hint text of the last directive, or undefined if the group is empty
      */
-    private getHintOfLastDirective(group: DirectiveGroup): string | undefined {
-        if (group.directives.length > 0) {
-            const lastDirective = group.directives[group.directives.length - 1];
-            
-            // Handle the case where the last directive is a middle or closing directive
-            if (lastDirective instanceof HintedDirective) {
-                return lastDirective.hint.text;
-            }
-            // Handle the case where the last directive is an opening directive
-            else if (lastDirective instanceof Directive) {
-                return lastDirective.condition;
-            }
-        }
-        return undefined;
-    }
-    
-    /**
-     * @brief Insert a directive to an existing group at a given position
-     * @param directive  The directive to add
-     * @param group  The group to add the directive to
-     * @param position  The position to add the directive at (optional)
-     */
-    private insertDirectiveToGroup(directive: Directive, group: DirectiveGroup, position?: number) {
-        // If position is not defined, add the directive at the end of the group
-        if (position === undefined) {
-            position = group.directives.length;
-        }
-
-        // Check for impossible positions
-        if (directive instanceof OpeningDirective && position > 0) {
-            log('Error: Cannot add an opening directive in the middle of a group');
-            return;
-        }
-        if (directive instanceof ClosingDirective && position < group.directives.length) {
-            log('Error: Cannot add a closing directive in the middle of a group');
-            return;
-        }
-        if (directive instanceof MiddleDirective && position === 0) {
-            log('Error: Cannot add a middle directive at the beginning of a group');
-            return;
-        }
-
-        // Add the directive to the group at the given position
-        group.directives.splice(position, 0, directive);
-
-        // TODO: Update all the hints below the added directive
-    }
-
-    /**
-     * @brief Get the directive at the given position
-     * @param doc The text document to search in
-     * @param position The position to search from
-     * @returns A {@link DirectiveGroup}, or undefined if not found
-     */
-    private getDirectiveFromPosition(doc: vscode.TextDocument, position: vscode.Position): Directive | undefined {
-        const groups = this.dataMap.get(doc);
-        if (!groups) {
-            return undefined;
-        }
-        return this.getGroupFromPosition(doc, position)?.directives.find(
-            d => d.range.start.line <= position.line && d.range.end.line >= position.line
-        );
-    }
-
-    /**
-     * @brief Get the group that encapsulate the position
-     * @param doc The text editor to search in
-     * @param position The position to search from
-     * @returns A {@link DirectiveGroup}, or undefined if not found
-     */
-    private getGroupFromPosition(doc: vscode.TextDocument, position: vscode.Position): DirectiveGroup | undefined {
-        let ret: DirectiveGroup | undefined = undefined;
-        
-        const groups = this.dataMap.get(doc);
-        if (!groups) {
-            return undefined;
-        }
-        
-        // Find groups that contains the position
-        const containingGroups = groups.filter(g => {
-                // Check if the position is between the first and last directive of the group
-                if (g.directives[0].range.start.line <= position.line && g.directives[g.directives.length - 1].range.end.line >= position.line) {
-                    return true;
+    private getHintOfLastDirective(group: DirectiveGroup): string {
+        try {
+            if (group.directives.length > 0) {
+                const lastDirective = group.directives[group.directives.length - 1];
+                
+                // Handle the case where the last directive is a middle or closing directive
+                if (lastDirective instanceof HintedDirective) {
+                    return lastDirective.hint.text;
                 }
-                else {
-                    return false;
+                // Handle the case where the last directive is an opening directive
+                else if (lastDirective instanceof Directive) {
+                    return lastDirective.condition;
                 }
             }
-        );
-
-        // Return the group with the highest nesting level
-        if (containingGroups.length > 0) {
-            ret = containingGroups.reduce((prev, curr) => prev.level > curr.level ? prev : curr);
+            return "";
         }
-
-        return ret;
+        catch(e) {
+            return "";
+        }
     }
 }

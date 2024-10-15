@@ -307,7 +307,7 @@ export class Extension {
         let oldState = this.parser.get(event.document)!;
 
         // Update the parser data
-        this.parser.updateDocument(event.document, event.contentChanges);
+        this.parser.parseDocument(event.document);
 
         this.updateDisplay(this.currEditor!, oldState);
     }
