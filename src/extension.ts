@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
-import { Parser } from './Parser';
+import { Parser, ParseDiff } from './parser';
 import { extensionId, log } from './Utils';
-import { DirectiveGroup } from './DirectiveGroup';
 import { Renderer } from './Renderer';
 
 export class Extension {
@@ -11,6 +10,12 @@ export class Extension {
         this.visibleEditors = [...vscode.window.visibleTextEditors];
         
         this.registerCallbacks(context);
+
+        // Load Renderer config
+        const cfg = vscode.workspace.getConfiguration(extensionId);
+        this.renderer.enable = cfg.get('enable')!;
+        this.renderer.enableHints = cfg.get('hints.enable')!;
+        this.renderer.enableOutlines = cfg.get('outlines.enable')!;
 
         // Parse all the visible editors
         this.visibleEditors.forEach(async editor => {
@@ -26,7 +31,7 @@ export class Extension {
         });
     }
 
-    public deactivate() {
+    public async deactivate() {
         // Remove the outlines from the current editor
         if (this.currEditor) {
             this.renderer.removeOutlines(this.currEditor);
@@ -49,6 +54,9 @@ export class Extension {
                 }
             });
         }
+
+        this.controller.abort();
+        await Promise.all(this.parsingPromises);
         
         log('Extension is deactivated');
     }
@@ -92,6 +100,10 @@ export class Extension {
             null, 
             context.subscriptions
         );
+
+        vscode.workspace.onDidCloseTextDocument(event => {
+
+        }, null, context.subscriptions);
     }
 
     /**
@@ -130,18 +142,18 @@ export class Extension {
     /**
      * @brief Map of parsing promise per document. The promise is valid when a parsing operation is running, or undefined otherwise.
      */
-    private parsingPromises : Map<vscode.TextDocument, Promise<void> | undefined> = new Map();
+    private parsingPromises : Map<vscode.TextDocument, Promise<ParseDiff | undefined>> = new Map();
 
     /**
      * @brief Editor changed event handler
      * @param newEditor The new text editor
      */
-    private activeEditorChanged(newEditor: vscode.TextEditor | undefined) {
+    private async activeEditorChanged(newEditor: vscode.TextEditor | undefined) {
         if(!newEditor) {
-            log('Editor changed to undefined');
+            log('Active Editor changed to undefined');
         }
         else {
-            log('Editor changed to', vscode.workspace.asRelativePath(newEditor.document.fileName));
+            log('Active Editor changed to', vscode.workspace.asRelativePath(newEditor.document.fileName));
         }
         
         // Remove the outlines from the old editor
@@ -166,8 +178,16 @@ export class Extension {
 
         // Update new editor
         if(this.currEditor) {
-            this.renderer.displayOutlines(this.currEditor, this.parser.get(this.currEditor.document));
-            this.renderer.displayHints(this.currEditor, this.parser.get(this.currEditor.document));
+            let index = this.parser.get(this.currEditor.document);
+            if (index === undefined) {
+                let ret = await this.updateDocument(this.currEditor.document);
+                if (ret !== undefined) {
+                    this.updateDisplay(this.currEditor, ret);
+                }
+            } else {
+                this.renderer.displayOutlines(this.currEditor, index);
+                this.renderer.displayHints(this.currEditor, index);
+            }
         }
     }
 
@@ -175,26 +195,22 @@ export class Extension {
      * @brief Visible editors changed event handler
      * @param newEditors The new list of visible text editors
      */
-    private visibleEditorsChanged(newEditors: readonly vscode.TextEditor[]) {
-        log('Visible editors changed');
+    private async visibleEditorsChanged(newEditors: readonly vscode.TextEditor[]) {
+        log('Visible editors changed (', newEditors.length, 'displayed)');
 
         // Compare differences between the old and new visible editors
         const oldEditors = this.visibleEditors;
         const addedEditors = newEditors.filter(e => !oldEditors.includes(e));
         const removedEditors = oldEditors.filter(e => !newEditors.includes(e));
+        
+        // Delete removed editors from visibleEditors list
+        this.visibleEditors = oldEditors.filter(e => !removedEditors.includes(e));
 
-        // Process removed editors
-        removedEditors.forEach(e => {
-            // TODO: Anything to do here?
-        });
+        // Hide hints of removedEditors
+        this.renderer.displayHints(removedEditors, []);
 
-        // Process added editors
-        addedEditors.forEach(e => {
-            this.visibleEditors.push(e);  // Add the new editors to the list
-            this.updateDocument(e.document).then(_ => {
-                this.renderer.displayHints(e, this.parser.get(e.document));
-            });
-        });
+        // Add the new editors to the list of visible ones
+        this.visibleEditors.concat(addedEditors);
     }
 
     /**
@@ -205,36 +221,43 @@ export class Extension {
         if(event.contentChanges.length === 0) {
             return;
         }
-        log('Document modified: ', vscode.workspace.asRelativePath(event.document.fileName));
-
-        // Save current data
-        let oldState = this.parser.get(event.document)!;
 
         // Update the parser data
-        this.updateDocument(event.document).then(_ => {
-            this.updateDisplay(this.currEditor!, oldState);
+        this.updateDocument(event.document).then(diffs => {
+            // Only update the display if parsing was successful
+            if (diffs !== undefined) {
+                this.updateDisplay(this.currEditor!, diffs);
+            } else {
+                // Handle the error case if needed, e.g., show a message to the user
+                log('Error updating document display: parsing failed.');
+            }
         });
+
+        log('Document modified: ', vscode.workspace.asRelativePath(event.document.fileName));
     }
 
     /**
      * @brief Update the hints and outlines in the given editor
      * @param editor The text editor to update the hints and outlines in
-     * @param oldGroups The old directive groups (can be ommitted if first time displaying this file)
+     * @param diff The ParseDiff containing old groups to remove and new groups to display
      */
-    private updateDisplay(editor: vscode.TextEditor, oldGroups: DirectiveGroup[] | undefined) {
+    private updateDisplay(editor: vscode.TextEditor, diff: ParseDiff) {
+        const [oldGroups, newGroups] = diff; // Destructure the ParseDiff tuple
+
         // Update hints
-        if(oldGroups !== undefined && oldGroups.length >= 0) {
+        if (oldGroups.length > 0) {
             this.renderer.removeHints(editor, oldGroups);
         }
-        this.renderer.displayHints(editor, this.parser.get(editor.document));
+         // Display new groups instead
+        this.renderer.displayHints(editor, newGroups);
 
         // Update outlines
-        if(editor === this.currEditor) {
-            
-            if(oldGroups !== undefined) {
+        if (editor === this.currEditor) {
+            if (oldGroups.length > 0) {
                 this.renderer.removeOutlines(editor);
             }
-            this.renderer.displayOutlines(editor, this.parser.get(editor.document));
+             // Display new groups instead
+            this.renderer.displayOutlines(editor, newGroups);
         }
     }
 
@@ -255,37 +278,30 @@ export class Extension {
             }
             this.renderer.removeOutlines(e);
         });
+
+        // Update renderer config
+        const cfg = vscode.workspace.getConfiguration(extensionId);
+        this.renderer.enable = cfg.get('enable')!;
+        this.renderer.enableHints = cfg.get('hints.enable')!;
+        this.renderer.enableOutlines = cfg.get('outlines.enable')!;
     }
 
     /**
      * @brief Update the document index data. If a parsing operation was already ongoing on this document, cancel it and re-run.
      */
-    private async updateDocument(document: vscode.TextDocument) {
+    private async updateDocument(document: vscode.TextDocument): Promise<ParseDiff | undefined> {
         // Get promise corresponding to document
         let promise = this.parsingPromises.get(document);
 
         if (promise !== undefined) {
-            this.controller.abort();
-            await promise;
+            this.controller.abort(); // Abort the ongoing operation
+            await promise;  // Ignore return value as parsing will be restarted
         }
 
-        // Start new parsing operation and save it to map
-        promise = this.parser.parseDocument(document, this.controller.signal);
+        // Call the new updateDocument function from the Parser class
+        promise = this.parser.updateDocument(document, this.controller.signal);
 
-        // Save promise in map
-        this.parsingPromises.set(document, promise);
-
-        // Return callback
-        promise.then(_ => {
-            // Reset promise, either when returning or cancelling
-            // as it produce the same behaviour
-            this.parsingPromises.set(document, undefined);
-        })
-        // Cancel callback
-        .catch(() => {
-
-        });
-
+        // Return promise resolution
         return promise;
     }
 }

@@ -5,6 +5,14 @@ import { Hint } from './Hint';
 import { DirectiveGroup } from './DirectiveGroup';
 import { Directive, HintedDirective, OpeningDirective, MiddleDirective, MiddleHintedDirective, ClosingDirective, DirectiveType } from './Directive';
 
+/**
+ * @brief Parsing differences tuple
+ * @details
+ * 1- Old groups
+ * 2- New groups
+ */
+export type ParseDiff = [DirectiveGroup[], DirectiveGroup[]];
+
 export class Parser {
     //##############//
     // Public Scope //
@@ -20,78 +28,31 @@ export class Parser {
     }
 
     /**
-     * @brief Parse the given document and search for the directive groups
-     * @param document The document to parse
-     * @returns An array of DirectiveGroup objects. Can be empty.
+     * @brief Update the document index data by comparing old and new parsing results.
+     * @param document The document to parse and update.
+     * @param signal An AbortSignal to handle cancellation.
+     * @returns A ParseDiff tuple containing arrays of old groups to remove and new groups to display.
+     * @todo Needs to be optimized
      */
-    public async parseDocument(document: vscode.TextDocument, signal: AbortSignal) {
-        // Check if the operation has already been aborted
-        if (signal.aborted) {
-            throw new Error("Cancelled");
+    public async updateDocument(document: vscode.TextDocument, signal: AbortSignal): Promise<ParseDiff | undefined> {
+        // Get previous data
+        let previousData = this.dataMap.get(document);
+
+        // Start new parsing operation
+        const newData = await this.parseDocument(document, signal);
+
+        if (newData === undefined) {
+            return undefined;
         }
 
-        // If file is not C or C++, return undefined
-        if (!(document.languageId === 'c' || document.languageId === 'cpp' || document.languageId === 'h' || document.languageId === 'hpp')) {
-            log('File is not a C or C++ file');
-        }
+        // TODO Compute the difference between previous and new data
+        // const diffResult = this.computeDifference(previousData, newData);
 
-        // Array of groups to return
-        let groups: DirectiveGroup[] = [];
-    
-        // Current nesting level
-        let currLevel = 0;
-    
-        // Parse line by line
-        for (let line = 0; line < document.lineCount; line++) {
-            // Check if the operation has been aborted
-            if (signal.aborted) {
-                throw new Error("Cancelled");
-            }
+        // Store the new parsing result in the dataMap
+        this.dataMap.set(document, newData);
 
-            // Parse the line 
-            const directive = this.parseLine(document.lineAt(line));
-    
-            // If there is no directive, continue to the next line
-            if (directive === null) {
-                continue;
-            }
-
-            // Opening directive found
-            if (directive instanceof OpeningDirective) {
-                // Create a new group
-                const newGroup = new DirectiveGroup([directive], currLevel + 1);
-                this.currGroups.push(newGroup);
-                currLevel++;
-            }
-            // Middle directive found
-            else if ((directive instanceof MiddleDirective) || (directive instanceof MiddleHintedDirective)) {
-                // Add the directive to the current group
-                try {
-                    this.currGroups[currLevel-1].directives.push(directive);
-                }
-                catch(e) {
-                    continue;
-                }
-            }
-            // Closing directive found
-            else if (directive instanceof ClosingDirective) {
-                // Add the directive to the current group
-                try {
-                    this.currGroups[currLevel-1].directives.push(directive);
-                }
-                catch(e) {
-                    continue;
-                }
-
-                // Add the group to the return array
-                groups.push(this.currGroups.pop()!);
-    
-                // Update nesting level
-                currLevel -= 1;
-            }
-        }
-        
-        this.dataMap.set(document, groups);
+        // return diffResult; // Return the computed difference as a ParseDiff tuple
+        return [previousData ? previousData : [], newData];  // TODO Return real diff
     }
 
     //#################//
@@ -139,6 +100,98 @@ export class Parser {
     private currGroups: DirectiveGroup[] = [];
     
     /*** Methods ***/
+
+    /**
+     * @brief Parse the given document and search for the directive groups
+     * @param document The document to parse
+     * @param signal An AbortSignal to handle cancellation.
+     * @returns A Promise that resolves to an array of DirectiveGroup objects. Can be empty.
+     */
+    private async parseDocument(document: vscode.TextDocument, signal: AbortSignal): Promise<DirectiveGroup[] | undefined> {
+        // Check if the operation has already been aborted
+        if (signal.aborted) {
+            return undefined;
+        }
+    
+        // If the file is not C or C++, return an empty array
+        if (!(document.languageId === 'c' || document.languageId === 'cpp' || document.languageId === 'h' || document.languageId === 'hpp')) {
+            log('File is not a C or C++ file');
+            return undefined;
+        }
+    
+        // Array of groups to return
+        let groups: DirectiveGroup[] = [];
+        
+        // Current nesting level
+        let currLevel = 0;
+    
+        // Get the previous groups for the document (if any) to reuse IDs
+        const previousGroups = this.dataMap.get(document) ?? [];
+        
+        // Create a map of previous groups by their opening directive's range
+        const previousGroupsMap = new Map<string, DirectiveGroup>(
+            previousGroups.map(group => [this.rangeToString(group.directives[0].range), group])
+        );
+        
+        // Parse line by line
+        for (let line = 0; line < document.lineCount; line++) {
+            // Check if the operation has been aborted
+            if (signal.aborted) {
+                return undefined;
+            }
+    
+            // Parse the line 
+            const directive = this.parseLine(document.lineAt(line));
+    
+            // If there is no directive, continue to the next line
+            if (directive === null) {
+                continue;
+            }
+    
+            // Opening directive found
+            if (directive instanceof OpeningDirective) {
+                const rangeString = this.rangeToString(directive.range);
+                
+                // Reuse the ID if the group with this opening directive existed before
+                const previousGroup = previousGroupsMap.get(rangeString);
+                const newGroup = new DirectiveGroup(
+                                        [directive],
+                                        currLevel + 1,
+                                        previousGroup ? previousGroup.id : undefined
+                                    );
+    
+                this.currGroups.push(newGroup);
+                currLevel++;
+            }
+            // Middle directive found
+            else if ((directive instanceof MiddleDirective) || (directive instanceof MiddleHintedDirective)) {
+                try {
+                    this.currGroups[currLevel - 1].directives.push(directive);
+                } catch (e) {
+                    continue;
+                }
+            }
+            // Closing directive found
+            else if (directive instanceof ClosingDirective) {
+                try {
+                    this.currGroups[currLevel - 1].directives.push(directive);
+                } catch (e) {
+                    continue;
+                }
+    
+                // Add the group to the return array
+                groups.push(this.currGroups.pop()!);
+    
+                // Update nesting level
+                currLevel -= 1;
+            }
+        }
+        
+        // this.dataMap.set(document, groups);
+    
+        // Return the parsed directive groups
+        return groups;
+    }
 
     /**
      * @brief Parse the line and return the corresponding directive
@@ -245,5 +298,84 @@ export class Parser {
         catch(e) {
             return "";
         }
+    }
+
+    /**
+     * @brief Compare two sets of data and return the difference.
+     *        The difference consists of groups that are new or have been changed,
+     *        and groups that should be removed from the display.
+     * @param previousData The old parsing result.
+     * @param newData The new parsing result.
+     * @returns A ParseDiff where the first element is an array of old groups to remove,
+     *          and the second element is an array of new groups to display.
+     */
+    private computeDifference(previousData: DirectiveGroup[] | undefined, newData: DirectiveGroup[]): ParseDiff {
+        const oldGroupsToRemove: DirectiveGroup[] = [];
+        const newGroupsToDisplay: DirectiveGroup[] = [];
+
+        if (!previousData) {
+            // If no previous data, all new groups should be displayed
+            newGroupsToDisplay.push(...newData);
+            return [oldGroupsToRemove, newGroupsToDisplay];
+        }
+
+        // Create a map for previous groups using their IDs for quick access
+        const prevGroupsMap = new Map(previousData.map(group => [group.id, group]));
+
+        // Find groups that are new or changed
+        newData.forEach(group => {
+            const previousGroup = prevGroupsMap.get(group.id);
+
+            // Compare IDs and number of directives in group
+            if (!previousGroup || previousGroup.id !== group.id || group.directives.length !== previousGroup.directives.length) {
+                // New group found
+                newGroupsToDisplay.push(group);
+            }
+            else{
+                // Compare conditions of each directives in group
+                for (let i = 0; i < group.directives.length; i++) {
+                    if (group.directives[i].condition !== previousGroup.directives[i].condition) {
+                        oldGroupsToRemove.push(previousGroup);
+                        newGroupsToDisplay.push(group);
+                    }
+                }
+            }
+        });
+
+        // Find groups that have been removed
+        previousData.forEach(previousGroup => {
+            // If group is not found in newData, it should be removed
+            if (!newData.find(group => group.id === previousGroup.id)) {
+                oldGroupsToRemove.push(previousGroup);
+            }
+        });
+
+        return [oldGroupsToRemove, newGroupsToDisplay];
+    }
+
+    /**
+     * @brief Compare two DirectiveGroup objects to determine if they are equal.
+     * @param group1 The first DirectiveGroup.
+     * @param group2 The second DirectiveGroup.
+     * @returns Whether the two groups are equal.
+     */
+    private areGroupsEqual(group1: DirectiveGroup, group2: DirectiveGroup): boolean {
+        // Compare IDs
+        if (group1.id !== group2.id) {
+            return false;
+        }
+
+        // Compare conditions of each directives in group
+        for (let i = 0; i < group1.directives.length; i++) {
+            if (group1.directives[i].condition !== group2.directives[i].condition) {
+                return false;
+            }
+        }
+
+        return true; // If all checks pass, the groups are considered equal
+    }
+
+    private rangeToString(range: vscode.Range) : string {
+        return range.start.line.toString() + ":" + range.start.character + ":" + range.end.character;
     }
 }

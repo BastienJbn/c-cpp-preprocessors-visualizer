@@ -84,11 +84,6 @@ export class Renderer {
         editors.forEach(e => {
             const doc = e.document;
 
-            // If activeEditorOnly, display in the current editor only
-            if (cfg.get('hints.activeEditorOnly') && e !== this.currEditor) {
-                return;
-            }
-
             const groups = dataIndex;
             if (!groups) {
                 return;
@@ -119,7 +114,7 @@ export class Renderer {
         });
     }
 
-    private enable: boolean = true;
-    private enableOutlines: boolean = true;
-    private enableHints: boolean = true;
+    public enable: boolean = true;
+    public enableOutlines: boolean = true;
+    public enableHints: boolean = true;
 }

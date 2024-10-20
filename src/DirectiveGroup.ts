@@ -6,6 +6,11 @@ export class DirectiveGroup {
     /*** Attributes ***/
     
     /**
+     * @brief Unique identifier for the group
+     */
+    public id: string;
+    
+    /**
      * @brief Array of {@link Directive}
      */
     public directives: Array<Directive> = [];
@@ -33,22 +38,34 @@ export class DirectiveGroup {
      * TODO: Currently not used, should be used to check if the group is valid.
      */
     public completed: boolean = false;
+
+    /** Static counter to help generate unique IDs */
+    private static idCounter = 0;
     
     /**
-     * @brief Creates a new instance of the DirectiveGroup class.
-     * @param directives Array of {@link Directive} of the group. (see {@link DirectiveGroup.directives})
-     * @param level  Nesting level of the directive group. (see {@link DirectiveGroup.level})
+     * @brief Creates a new instance of the DirectiveGroup class with a new ID.
+     * @param directives Array of {@link Directive} of the group.
+     * @param level  Nesting level of the directive group.
      * 
      * @details
      * This constructor initializes all attributes of the class.
      * Attributes are set to default values if they are not provided.
      */
     constructor(
-        directives: Array<Directive> | undefined,
+        directives: Directive[] | undefined,
         level: number | undefined,
+        id: string | undefined,
     ) {
-        // For each parameter, if it is undefined, we set it to a default value
+        this.id = id ?? this.generateId();  // Generate a unique ID for each group
         this.directives = directives ?? [];
         this.level = level ?? 0;
+    }
+
+    /**
+     * @brief Generates a unique ID for each DirectiveGroup instance
+     */
+    private generateId(): string {
+        // Use a combination of timestamp and counter for uniqueness
+        return `${Date.now()}-${DirectiveGroup.idCounter++}`;
     }
 }
