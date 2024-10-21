@@ -16,6 +16,11 @@ export abstract class Directive {
      */
     public condition: string;
 
+    /**
+     * Dummy function. Overriden by derived class to dispose any private attribute.
+     */
+    public dispose(): void {}
+
     constructor(range: vscode.Range, condition: string) {
         this.range = range;
         this.condition = condition;
@@ -31,6 +36,10 @@ export abstract class HintedDirective extends Directive {
     constructor(directive: vscode.Range, paramStr: string, hint: Hint) {
         super(directive, paramStr);
         this.hint = hint;
+    }
+    
+    public override dispose() {
+        this.hint.decoType.dispose();
     }
 }
 

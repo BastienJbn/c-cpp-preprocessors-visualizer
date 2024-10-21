@@ -55,6 +55,17 @@ export class Parser {
         return [previousData ? previousData : [], newData];  // TODO Return real diff
     }
 
+    public dispose() {
+        // Foreach doc index in datamap
+        for (const index of this.dataMap.values()) {
+            index.forEach(group => {
+                group.directives.forEach(d => {
+                    d.dispose();
+                });
+            });
+        }
+    }
+
     //#################//
     // Private Scope   //
     //#################//
@@ -78,10 +89,10 @@ export class Parser {
             /^#elif\s+/,
         ],
         [DirectiveType.MiddleHinted] : [
-            /^#else/,
+            /^#else\s*$/,
         ],
         [DirectiveType.Closing]: [
-            /^#endif/,
+            /^#endif\s*$/,
         ],
     };
 

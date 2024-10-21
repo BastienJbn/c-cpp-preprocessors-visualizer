@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { Parser, ParseDiff } from './parser';
 import { extensionId, log } from './Utils';
 import { Renderer } from './Renderer';
+import * as Styles from './Styles';
 
 export class Extension {
     public activate(context: vscode.ExtensionContext) {
@@ -57,6 +58,11 @@ export class Extension {
 
         this.controller.abort();
         await Promise.all(this.parsingPromises);
+
+        Styles.outlineDecoType.dispose();
+        Styles.scrollbarDecoType.dispose();
+
+        this.parser.dispose();
         
         log('Extension is deactivated');
     }
