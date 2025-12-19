@@ -89,10 +89,10 @@ export class Parser {
             /^#elif\s+/,
         ],
         [DirectiveType.MiddleHinted] : [
-            /^#else\s*$/,
+            /^#else\s*/,
         ],
         [DirectiveType.Closing]: [
-            /^#endif\s*$/,
+            /^#endif\s*/,
         ],
     };
 
