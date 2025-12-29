@@ -2,6 +2,8 @@
 
 This extension is a tool for a better visualization of preprocessor directives in C/C++ code.
 
+![c-cpp-preprocessor-visualizer-demo](https://github.com/user-attachments/assets/a9ac7198-b382-41af-be86-70092c85e3be)
+
 > Extension is under development.
 
 ## Features
