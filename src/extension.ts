@@ -55,9 +55,12 @@ export class Extension {
                 }
             });
         }
+        
+        // log(`Abort all running parsing.`);
+        // log(`${this.parsingPromises.size} Running promises.`);
 
-        this.controller.abort();
-        await Promise.all(this.parsingPromises);
+        // this.controller.abort();
+        // await Promise.all(this.parsingPromises);
 
         Styles.outlineDecoType.dispose();
         Styles.scrollbarDecoType.dispose();
@@ -295,17 +298,33 @@ export class Extension {
     /**
      * @brief Update the document index data. If a parsing operation was already ongoing on this document, cancel it and re-run.
      */
-    private async updateDocument(document: vscode.TextDocument): Promise<ParseDiff | undefined> {
+    private async updateDocument(document: vscode.TextDocument): Promise<ParseDiff | undefined>
+    {
         // Get promise corresponding to document
         let promise = this.parsingPromises.get(document);
 
-        if (promise !== undefined) {
+        // If any running, abort it
+        if (promise !== undefined)
+        {
+            log(`Abort parsing for "${document.fileName}".`);
+            log(`${this.parsingPromises.size} Running promises.`);
             this.controller.abort(); // Abort the ongoing operation
             await promise;  // Ignore return value as parsing will be restarted
         }
 
         // Call the new updateDocument function from the Parser class
         promise = this.parser.updateDocument(document, this.controller.signal);
+
+        // Save promise
+        this.parsingPromises.set(document, promise);
+
+        log(`Start parsing. ${this.parsingPromises.size} Running promises.`);
+
+        promise.then(_ => {
+            this.parsingPromises.delete(document);
+            log(`Parsing done for "${document.fileName}".`);
+            log(`${this.parsingPromises.size} Running promises.`);
+        });
 
         // Return promise resolution
         return promise;

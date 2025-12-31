@@ -13,9 +13,22 @@
 				"--extensionDevelopmentPath=${workspaceFolder}"
 			],
 			"outFiles": [
-				"${workspaceFolder}/out/**/*.js"
+				"${workspaceFolder}/dist/**/*.js",
+				"${workspaceFolder}/dist/**/*.js.map"
 			],
 			"preLaunchTask": "${defaultBuildTask}",
+		},
+		{
+			"name": "Extension Tests",
+			"type": "extensionHost",
+			"request": "launch",
+			"runtimeExecutable": "${execPath}",
+			"args": [
+				"--extensionDevelopmentPath=${workspaceFolder}",
+				"--extensionTestsPath=${workspaceFolder}/test"
+			],
+			"outFiles": ["${workspaceFolder}/test/**/*.js"],
+			"preLaunchTask": "npm: compile-tests"
 		}
 	]
 }

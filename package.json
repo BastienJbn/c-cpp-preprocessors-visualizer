@@ -2,7 +2,7 @@
   "name": "c-cpp-preprocessors-visualizer",
   "displayName": "C/C++ Preprocessors Visualizer",
   "description": "Intuitive visual cues for macro and preprocessor directives",
-  "version": "0.3.2",
+  "version": "0.5.0",
   "engines": {
     "vscode": "^1.87.0"
   },
@@ -14,7 +14,8 @@
     "onLanguage:c",
     "onLanguage:cpp"
   ],
-  "main": "./out/main.js",
+  "main": "dist/extension.js",
+  "icon": "icon.png",
   "contributes": {
     "configuration": {
       "type": "object",
@@ -25,7 +26,6 @@
           "default": true,
           "description": "Enable/disable this extension"
         },
-
         "c-cpp-preprocessors-visualizer.hints.enable": {
           "type": "boolean",
           "default": true,
@@ -36,7 +36,6 @@
           "default": false,
           "description": "Display hints only in the editor your cursor is in"
         },
-
         "c-cpp-preprocessors-visualizer.outlines.enable": {
           "type": "boolean",
           "default": true,
@@ -46,20 +45,31 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "publish": "vsce publish",
-    "compile": "tsc -p ./"
+    "compile": "npm run check-types && node esbuild.js",
+    "check-types": "tsc --noEmit",
+    "watch": "npm-run-all -p watch:*",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "vscode:prepublish": "npm run package",
+    "package": "npm run check-types && node esbuild.js --production",
+
+    "compile-tests": "tsc -p . --outDir dist/test",
+    "pretest": "npm run compile-tests",
+    "test": "vscode-test",
+
+    "publish": "vsce publish"
   },
   "devDependencies": {
-    "@types/vscode": "^1.87.0",
     "@types/mocha": "^10.0.6",
     "@types/node": "18.x",
+    "@types/vscode": "^1.87.0",
     "@typescript-eslint/eslint-plugin": "^7.0.2",
     "@typescript-eslint/parser": "^7.0.2",
-    "eslint": "^8.56.0",
-    "typescript": "^5.3.3",
     "@vscode/test-cli": "^0.0.6",
-    "@vscode/test-electron": "^2.3.9"
+    "@vscode/test-electron": "^2.3.9",
+    "esbuild": "^0.27.2",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3"
   },
   "repository": {
     "type": "git",

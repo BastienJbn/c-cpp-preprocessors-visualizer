@@ -4,12 +4,13 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"type": "npm",
-			"script": "compile",
-			"problemMatcher": "$tsc",
-			"isBackground": false,
+			"label": "watch",
+			"dependsOn": [
+				"npm: watch:tsc",
+				"npm: watch:esbuild"
+			],
 			"presentation": {
-				"reveal": "silent"
+				"reveal": "never"
 			},
 			"group": {
 				"kind": "build",
@@ -17,10 +18,35 @@
 			}
 		},
 		{
+			"label": "npm: watch:esbuild",
 			"type": "npm",
-			"script": "watch",
+			"script": "watch:esbuild",
+			"group": "build",
+			"problemMatcher": "$esbuild-watch",
+			"isBackground": true,
+			"presentation": {
+				"group": "watch",
+				"reveal": "never"
+			}
+		},
+		{
+			"label": "npm: watch:tsc",
+			"type": "npm",
+			"script": "watch:tsc",
+			"group": "build",
 			"problemMatcher": "$tsc-watch",
 			"isBackground": true,
+			"presentation": {
+				"group": "watch",
+				"reveal": "never"
+			}
+		},
+		{
+			"label": "npm: package",
+			"type": "npm",
+			"script": "package --omit=dev",
+			"problemMatcher": "$tsc",
+			"isBackground": false,
 			"presentation": {
 				"reveal": "silent"
 			},

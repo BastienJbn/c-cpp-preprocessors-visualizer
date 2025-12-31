@@ -12,9 +12,9 @@ This extension is a tool for a better visualization of preprocessor directives i
 - [x] Outline definition (`#define`, `#undef`) preprocessor directives when cursor is on a line containing one.
 - [x] Display tested conditionnal preprocessor directives next to the closing directive.
 - [x] Add commands to toggle the extension behavior on/off.
+- [x] Add settings to personalize the extension behavior.
 
 - [ ] Highlight `#define` preprocessor directives. (Useful for multilines macro)
-- [ ] Add settings to personalize the extension behavior.
 
 ## Extension Settings
 
@@ -25,7 +25,7 @@ This extension is a tool for a better visualization of preprocessor directives i
 
 ## Release Notes
 
-### 0.3.3
+### 0.5.0
 
-- **Fix** hints update when editing file
-- **Refactor** code to improve performance and readability. Parsing file once and save data. Use of class instead of functions.
+- **Bundle** extension for faster loading time.
+- **Add** extension icon.
